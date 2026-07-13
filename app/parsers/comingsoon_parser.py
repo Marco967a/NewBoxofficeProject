@@ -1,9 +1,11 @@
 import re
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Optional
 
 import requests
 from bs4 import BeautifulSoup
+
+from app.models.weekly_record import WeeklyBoxOfficeRecord
 
 
 COMINGSOON_URL = "https://www.comingsoon.it/cinema/boxoffice/"
@@ -23,6 +25,24 @@ MONTHS_IT = {
     "novembre": 11,
     "dicembre": 12,
 }
+
+# Riconosce il link a una scheda film, es:
+# https://www.comingsoon.it/film/minions-e-monsters/67915/scheda/
+FILM_LINK_HREF = re.compile(r"/film/[^/]+/\d+/scheda/?$")
+
+# Cerca solo i campi della card di classifica (etichette semplici, NIENTE markdown).
+# Le card senza "Settimane:"/"Schermi:" (es. widget USA in fondo pagina, altri box)
+# non producono match e vengono scartate automaticamente.
+FIELDS_PATTERN = re.compile(
+    r"Settimane:\s*(\d+)\s*"
+    r"Distribuzione:\s*(.+?)\s*"
+    r"Inc\.\s*weekend:\s*€\s*([\d\.\,]+)\s*"
+    r"Schermi:\s*(\d+)\s*"
+    r"Inc\.\s*totale:\s*€\s*([\d\.\,]+)",
+    re.DOTALL
+)
+
+RANK_PATTERN = re.compile(r"^\s*(\d+)")
 
 
 def parse_euro(value: str) -> float:
@@ -57,56 +77,60 @@ def extract_week_range(text: str) -> tuple[Optional[str], Optional[str]]:
     return week_start, week_end
 
 
-def extract_top_section(text: str) -> str:
-    if "I film più attesi" in text:
-        return text.split("I film più attesi")[0]
-    return text
-
-
-def parse_comingsoon_weekly_boxoffice() -> List[Dict]:
+def parse_comingsoon_weekly_boxoffice() -> List[WeeklyBoxOfficeRecord]:
     response = requests.get(COMINGSOON_URL, timeout=30)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
-    raw_text = soup.get_text("\n", strip=True)
-    top_text = extract_top_section(raw_text)
 
-    week_start, week_end = extract_week_range(top_text)
+    week_start, week_end = extract_week_range(soup.get_text(" ", strip=True))
 
-    pattern = re.compile(
-        r"\n(\d+)\n"                                  # rank
-        r"(.+?)\n"                                    # title
-        r"\*\*Settimane:\*\*\s*(\d+)\s*"              # weeks_in_release
-        r"\*\*Distribuzione:\*\*\s*(.+?)\s*"          # distributor
-        r"\*\*Inc\. weekend:\*\*\s*€([\d\.\,]+)\s*"   # weekly_gross
-        r"\*\*Schermi:\*\*\s*(\d+)\s*"                # screen_count
-        r"\*\*Inc\. totale:\*\*\s*€([\d\.\,]+)",      # total_gross
-        re.DOTALL
-    )
+    film_links = soup.find_all("a", href=FILM_LINK_HREF)
 
-    matches = pattern.findall(top_text)
-    records = []
+    records: List[WeeklyBoxOfficeRecord] = []
+    seen_ranks = set()
 
-    for match in matches:
-        rank, title, weeks, distributor, weekend_gross, screens, total_gross = match
+    for a in film_links:
+        entry_text = a.get_text("\n", strip=True)
 
-        records.append({
-            "source_name": "comingsoon",
-            "territory": "IT",
-            "week_start": week_start,
-            "week_end": week_end,
-            "rank": int(rank),
-            "movie_id": None,
-            "external_movie_title": " ".join(title.split()),
-            "distributor": " ".join(distributor.split()),
-            "weekly_gross": parse_euro(weekend_gross),
-            "weekly_admissions": None,
-            "screen_count": parse_int(screens),
-            "weeks_in_release": int(weeks),
-            "is_italian": None,
-            "total_gross": parse_euro(total_gross),
-        })
+        fields_match = FIELDS_PATTERN.search(entry_text)
+        if not fields_match:
+            # Non è una riga di classifica completa (es. widget secondario,
+            # sezione "film più attesi", box USA in $ invece che €, ecc.)
+            continue
 
+        rank_match = RANK_PATTERN.search(entry_text)
+        title = (a.get("title") or "").strip()
+
+        if not rank_match or not title:
+            continue
+
+        rank_int = int(rank_match.group(1))
+        if rank_int in seen_ranks:
+            continue
+        seen_ranks.add(rank_int)
+
+        weeks, distributor, weekend_gross, screens, total_gross = fields_match.groups()
+
+        records.append(
+            WeeklyBoxOfficeRecord(
+                source_name="comingsoon",
+                territory="IT",
+                week_start=week_start,
+                week_end=week_end,
+                rank=rank_int,
+                external_movie_title=title,
+                distributor=" ".join(distributor.split()),
+                weekly_gross=parse_euro(weekend_gross),
+                weekly_admissions=None,
+                screen_count=parse_int(screens),
+                weeks_in_release=int(weeks),
+                is_italian=None,
+                movie_id=None,
+            )
+        )
+
+    records.sort(key=lambda r: r.rank)
     return records
 
 
