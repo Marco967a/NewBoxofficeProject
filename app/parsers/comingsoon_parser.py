@@ -1,6 +1,6 @@
 import re
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, date
+from typing import List, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
@@ -28,7 +28,7 @@ MONTHS_IT = {
 
 # Riconosce il link a una scheda film, es:
 # https://www.comingsoon.it/film/minions-e-monsters/67915/scheda/
-FILM_LINK_HREF = re.compile(r"/film/[^/]+/\d+/scheda/?$")
+FILM_LINK_HREF = re.compile(r"(?:https?://[^/]+)?/film/[^/]+/\d+/scheda/?$")
 
 # Cerca solo i campi della card di classifica (etichette semplici, NIENTE markdown).
 # Le card senza "Settimane:"/"Schermi:" (es. widget USA in fondo pagina, altri box)
@@ -36,13 +36,13 @@ FILM_LINK_HREF = re.compile(r"/film/[^/]+/\d+/scheda/?$")
 FIELDS_PATTERN = re.compile(
     r"Settimane:\s*(\d+)\s*"
     r"Distribuzione:\s*(.+?)\s*"
-    r"Inc\.\s*weekend:\s*€\s*([\d\.\,]+)\s*"
+    r"Inc\.?\s*weekend:\s*€\s*([\d\.\,]+)\s*"
     r"Schermi:\s*(\d+)\s*"
-    r"Inc\.\s*totale:\s*€\s*([\d\.\,]+)",
-    re.DOTALL
+    r"Inc\.?\s*totale:\s*€\s*([\d\.\,]+)",
+    re.DOTALL | re.IGNORECASE
 )
 
-RANK_PATTERN = re.compile(r"^\s*(\d+)")
+RANK_PATTERN = re.compile(r"\b(\d{1,2})\b")
 
 
 def parse_euro(value: str) -> float:
@@ -54,17 +54,34 @@ def parse_int(value: str) -> int:
     return int(value.replace(".", "").strip())
 
 
-def parse_italian_date(day: str, month_name: str, year: str) -> str:
-    month = MONTHS_IT[month_name.lower()]
+def parse_italian_date(day: str, month_name: str, year: str) -> date:
+    month = MONTHS_IT.get(month_name.lower())
+    if not month:
+        raise ValueError(f"Nome mese non riconosciuto: '{month_name}'")
+
     dt = datetime(int(year), month, int(day))
-    return dt.strftime("%Y-%m-%d")
+    return dt.date()
 
 
-def extract_week_range(text: str) -> tuple[Optional[str], Optional[str]]:
+def extract_week_range(text: str) -> tuple[Optional[date], Optional[date]]:
+    # Try pattern with possibly different months/years for start and end
+    pattern_multi = re.search(
+        r"dal\s+(\d{1,2})\s+([a-zà]+)\s+(\d{4})\s+al\s+(\d{1,2})\s+([a-zà]+)\s+(\d{4})",
+        text,
+        re.IGNORECASE,
+    )
+
+    if pattern_multi:
+        d1, m1, y1, d2, m2, y2 = pattern_multi.groups()
+        start = parse_italian_date(d1, m1, y1)
+        end = parse_italian_date(d2, m2, y2)
+        return start, end
+
+    # Fallback: same-month pattern
     pattern = re.search(
         r"dal\s+(\d{1,2})\s+al\s+(\d{1,2})\s+([a-zà]+)\s+(\d{4})",
         text,
-        re.IGNORECASE
+        re.IGNORECASE,
     )
 
     if not pattern:
@@ -78,12 +95,17 @@ def extract_week_range(text: str) -> tuple[Optional[str], Optional[str]]:
 
 
 def parse_comingsoon_weekly_boxoffice() -> List[WeeklyBoxOfficeRecord]:
-    response = requests.get(COMINGSOON_URL, timeout=30)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36"
+    }
+    response = requests.get(COMINGSOON_URL, timeout=30, headers=headers)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
 
     week_start, week_end = extract_week_range(soup.get_text(" ", strip=True))
+    if not week_start or not week_end:
+        raise RuntimeError("Impossibile estrarre l'intervallo settimanale dalla pagina ComingSoon")
 
     film_links = soup.find_all("a", href=FILM_LINK_HREF)
 
@@ -100,7 +122,7 @@ def parse_comingsoon_weekly_boxoffice() -> List[WeeklyBoxOfficeRecord]:
             continue
 
         rank_match = RANK_PATTERN.search(entry_text)
-        title = (a.get("title") or "").strip()
+        title = (a.get("title") or a.get_text(" ", strip=True)).strip()
 
         if not rank_match or not title:
             continue
