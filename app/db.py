@@ -62,7 +62,14 @@ def create_weekly_tables():
         cur.close()
 
 
-def insert_weekly_records(records):
+def insert_weekly_records(records, ingestion_run_id=None, conn=None):
+    """Insert or update weekly records.
+
+    Args:
+        records: iterable of dicts or objects with attributes
+        ingestion_run_id: optional ingestion run id to store
+        conn: optional existing DB connection to use
+    """
     if not records:
         return
     # Normalize records (support both dicts and objects with attributes)
@@ -86,7 +93,7 @@ def insert_weekly_records(records):
             get(r, "screen_count"),
             get(r, "weeks_in_release"),
             get(r, "is_italian"),
-            None,  # ingestion_run_id (optional)
+            ingestion_run_id,
         )
         for r in records
     ]
@@ -112,6 +119,10 @@ def insert_weekly_records(records):
             updated_at = NOW()
     """
 
-    with get_connection() as conn:
+    if conn is None:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                execute_values(cur, sql, rows, page_size=100)
+    else:
         with conn.cursor() as cur:
             execute_values(cur, sql, rows, page_size=100)

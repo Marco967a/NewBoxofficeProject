@@ -1,10 +1,9 @@
 # app/services/weekly_box_office_service.py
 import logging
 
-from app.db import get_connection
+from app.db import get_connection, insert_weekly_records, create_weekly_tables
 from app.repositories.ingestion_run_repository import IngestionRunRepository
 from app.repositories.movie_repository import MovieRepository
-from app.repositories.weekly_box_office_repository import WeeklyBoxOfficeRepository
 
 
 logger = logging.getLogger(__name__)
@@ -14,16 +13,18 @@ class WeeklyBoxOfficeService:
     def __init__(self):
         self.run_repository = IngestionRunRepository()
         self.movie_repository = MovieRepository()
-        self.weekly_repository = WeeklyBoxOfficeRepository()
+        # weekly repository removed; use db.insert_weekly_records
 
     def load_weekly_records(self, records: list, source_name: str) -> int:
         records_read = len(records)
         records_written = 0
 
+        # Ensure weekly and ingestion tables exist
+        create_weekly_tables()
+
         with get_connection() as conn:
             self.run_repository.create_table(conn)
             self.movie_repository.create_table(conn)
-            self.weekly_repository.create_table(conn)
 
             run_id = self.run_repository.start_run(
                 conn,
@@ -58,11 +59,9 @@ class WeeklyBoxOfficeService:
                         )
                     )
 
-                records_written = self.weekly_repository.upsert_weekly_records(
-                    conn,
-                    enriched_records,
-                    ingestion_run_id=run_id,
-                )
+                # Insert/upsert using the unified DB helper (reuse current conn)
+                insert_weekly_records(enriched_records, ingestion_run_id=run_id, conn=conn)
+                records_written = len(enriched_records)
 
                 self.run_repository.finish_run(
                     conn,
