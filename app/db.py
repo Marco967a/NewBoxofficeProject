@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import psycopg2
+from psycopg2.extras import execute_values
 
 from app.settings import get_settings
 
@@ -64,53 +65,53 @@ def create_weekly_tables():
 def insert_weekly_records(records):
     if not records:
         return
+    # Normalize records (support both dicts and objects with attributes)
+    def get(r, key, default=None):
+        if isinstance(r, dict):
+            return r.get(key, default)
+        return getattr(r, key, default)
+
+    rows = [
+        (
+            get(r, "source_name"),
+            get(r, "territory", "IT"),
+            get(r, "week_start"),
+            get(r, "week_end"),
+            get(r, "rank"),
+            get(r, "movie_id"),
+            get(r, "external_movie_title"),
+            get(r, "distributor"),
+            get(r, "weekly_gross"),
+            get(r, "weekly_admissions"),
+            get(r, "screen_count"),
+            get(r, "weeks_in_release"),
+            get(r, "is_italian"),
+            None,  # ingestion_run_id (optional)
+        )
+        for r in records
+    ]
+
+    sql = """
+        INSERT INTO weekly_box_office (
+            source_name, territory, week_start, week_end, rank, movie_id,
+            external_movie_title, distributor, weekly_gross, weekly_admissions,
+            screen_count, weeks_in_release, is_italian, ingestion_run_id
+        )
+        VALUES %s
+        ON CONFLICT (source_name, territory, week_start, week_end, rank)
+        DO UPDATE SET
+            movie_id = EXCLUDED.movie_id,
+            external_movie_title = EXCLUDED.external_movie_title,
+            distributor = EXCLUDED.distributor,
+            weekly_gross = EXCLUDED.weekly_gross,
+            weekly_admissions = EXCLUDED.weekly_admissions,
+            screen_count = EXCLUDED.screen_count,
+            weeks_in_release = EXCLUDED.weeks_in_release,
+            is_italian = EXCLUDED.is_italian,
+            ingestion_run_id = EXCLUDED.ingestion_run_id,
+            updated_at = NOW()
+    """
 
     with get_connection() as conn:
-        cur = conn.cursor()
-
-        for record in records:
-            cur.execute("""
-                INSERT INTO weekly_box_office (
-                    source_name,
-                    territory,
-                    week_start,
-                    week_end,
-                    rank,
-                    movie_id,
-                    external_movie_title,
-                    distributor,
-                    weekly_gross,
-                    weekly_admissions,
-                    screen_count,
-                    weeks_in_release,
-                    is_italian
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (source_name, territory, week_start, week_end, rank)
-                DO UPDATE SET
-                    movie_id = EXCLUDED.movie_id,
-                    external_movie_title = EXCLUDED.external_movie_title,
-                    distributor = EXCLUDED.distributor,
-                    weekly_gross = EXCLUDED.weekly_gross,
-                    weekly_admissions = EXCLUDED.weekly_admissions,
-                    screen_count = EXCLUDED.screen_count,
-                    weeks_in_release = EXCLUDED.weeks_in_release,
-                    is_italian = EXCLUDED.is_italian,
-                    updated_at = NOW()
-            """, (
-                record.get("source_name"),
-                record.get("territory", "IT"),
-                record.get("week_start"),
-                record.get("week_end"),
-                record.get("rank"),
-                record.get("movie_id"),
-                record.get("external_movie_title"),
-                record.get("distributor"),
-                record.get("weekly_gross"),
-                record.get("weekly_admissions"),
-                record.get("screen_count"),
-                record.get("weeks_in_release"),
-                record.get("is_italian"),
-            ))
-
-        cur.close()
+        with conn.cursor() as cur:
+            execute_values(cur, sql, rows, page_size=100)
