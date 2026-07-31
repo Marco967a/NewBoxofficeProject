@@ -29,13 +29,19 @@ DB_PASSWORD=...
 python init_db.py
 ```
 
-4. Esegui il parser e carica i record in DB (script di test):
+4. Esegui il bootstrap TMDB separatamente:
 
 ```powershell
-$env:PYTHONPATH="."; python scripts/load_weekly_run.py
+$env:PYTHONPATH="."; python scripts/bootstrap.py
 ```
 
-5. Verifica il contenuto della tabella:
+5. Esegui il caricamento weekly separatamente:
+
+```powershell
+$env:PYTHONPATH="."; python scripts/weekly_run.py
+```
+
+6. Verifica il contenuto della tabella:
 
 ```powershell
 $env:PYTHONPATH="."; python scripts/verify_db.py

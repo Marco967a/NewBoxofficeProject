@@ -1,9 +1,10 @@
 # app/services/weekly_box_office_service.py
 import logging
 
-from app.db import get_connection, insert_weekly_records, create_weekly_tables
+from app.db import get_connection
 from app.repositories.ingestion_run_repository import IngestionRunRepository
 from app.repositories.movie_repository import MovieRepository
+from app.repositories.weekly_box_office_repository import WeeklyBoxOfficeRepository
 
 
 logger = logging.getLogger(__name__)
@@ -13,18 +14,16 @@ class WeeklyBoxOfficeService:
     def __init__(self):
         self.run_repository = IngestionRunRepository()
         self.movie_repository = MovieRepository()
-        # weekly repository removed; use db.insert_weekly_records
+        self.weekly_repository = WeeklyBoxOfficeRepository()
 
     def load_weekly_records(self, records: list, source_name: str) -> int:
         records_read = len(records)
         records_written = 0
 
-        # Ensure weekly and ingestion tables exist
-        create_weekly_tables()
-
         with get_connection() as conn:
             self.run_repository.create_table(conn)
             self.movie_repository.create_table(conn)
+            self.weekly_repository.create_table(conn)
 
             run_id = self.run_repository.start_run(
                 conn,
@@ -36,11 +35,6 @@ class WeeklyBoxOfficeService:
                 enriched_records = []
 
                 for record in records:
-                    movie_id = self.movie_repository.find_movie_id_by_title(
-                        conn,
-                        record.external_movie_title
-                    )
-
                     enriched_records.append(
                         record.__class__(
                             source_name=record.source_name,
@@ -55,13 +49,15 @@ class WeeklyBoxOfficeService:
                             screen_count=record.screen_count,
                             weeks_in_release=record.weeks_in_release,
                             is_italian=record.is_italian,
-                            movie_id=movie_id,
+                            movie_id=None,
                         )
                     )
 
-                # Insert/upsert using the unified DB helper (reuse current conn)
-                insert_weekly_records(enriched_records, ingestion_run_id=run_id, conn=conn)
-                records_written = len(enriched_records)
+                records_written = self.weekly_repository.upsert_records(
+                    conn,
+                    enriched_records,
+                    ingestion_run_id=run_id,
+                )
 
                 self.run_repository.finish_run(
                     conn,

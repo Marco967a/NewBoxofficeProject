@@ -59,6 +59,8 @@ except Exception as e:
 print("\n[4/5] Struttura File...")
 files = {
     "main_v3.py": "Entry point principale",
+    "scripts/bootstrap.py": "Script dedicato al bootstrap TMDB",
+    "scripts/weekly_run.py": "Script dedicato al caricamento weekly",
     ".env": "Configurazione ambiente",
     "app/__init__.py": "Package app",
     "app/db.py": "Database utilities",
@@ -87,6 +89,8 @@ import py_compile
 import tempfile
 py_files = [
     "main_v3.py",
+    "scripts/bootstrap.py",
+    "scripts/weekly_run.py",
     "app/db.py",
     "app/settings.py",
     "app/tmdb_client.py",

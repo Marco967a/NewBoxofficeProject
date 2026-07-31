@@ -79,13 +79,3 @@ class MovieRepository:
 
         return len(rows)
 
-    def find_movie_id_by_title(self, conn, title: str) -> int | None:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id
-                FROM movies
-                WHERE lower(title) = lower(%s)
-                LIMIT 1
-            """, (title,))
-            row = cur.fetchone()
-            return row[0] if row else None
