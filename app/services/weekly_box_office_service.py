@@ -16,8 +16,16 @@ class WeeklyBoxOfficeService:
         self.movie_repository = MovieRepository()
         self.weekly_repository = WeeklyBoxOfficeRepository()
 
-    def load_weekly_records(self, records: list, source_name: str) -> int:
+    def load_weekly_records(self, records: list, source_name: str, dry_run: bool = False) -> int:
         records_read = len(records)
+        if dry_run:
+            logger.info(
+                "Dry run completed source=%s read=%s written=0",
+                source_name,
+                records_read,
+            )
+            return 0
+
         records_written = 0
 
         with get_connection() as conn:

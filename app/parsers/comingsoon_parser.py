@@ -65,15 +65,28 @@ def parse_italian_date(day: str, month_name: str, year: str) -> date:
 
 def extract_week_range(text: str) -> tuple[Optional[date], Optional[date]]:
     # Try pattern with possibly different months/years for start and end
-    pattern_multi = re.search(
+    pattern_multi_both_years = re.search(
         r"dal\s+(\d{1,2})\s+([a-zà]+)\s+(\d{4})\s+al\s+(\d{1,2})\s+([a-zà]+)\s+(\d{4})",
         text,
         re.IGNORECASE,
     )
 
-    if pattern_multi:
-        d1, m1, y1, d2, m2, y2 = pattern_multi.groups()
+    if pattern_multi_both_years:
+        d1, m1, y1, d2, m2, y2 = pattern_multi_both_years.groups()
         start = parse_italian_date(d1, m1, y1)
+        end = parse_italian_date(d2, m2, y2)
+        return start, end
+
+    # Pattern where the year appears only at the end, e.g. "dal 30 luglio al 02 agosto 2026"
+    pattern_multi_end_year = re.search(
+        r"dal\s+(\d{1,2})\s+([a-zà]+)\s+al\s+(\d{1,2})\s+([a-zà]+)\s+(\d{4})",
+        text,
+        re.IGNORECASE,
+    )
+
+    if pattern_multi_end_year:
+        d1, m1, d2, m2, y2 = pattern_multi_end_year.groups()
+        start = parse_italian_date(d1, m1, y2)
         end = parse_italian_date(d2, m2, y2)
         return start, end
 
