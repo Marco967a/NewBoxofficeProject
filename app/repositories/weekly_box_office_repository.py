@@ -47,10 +47,8 @@ class WeeklyBoxOfficeRepository:
                 get(r, "external_movie_title"),
                 get(r, "distributor"),
                 get(r, "weekly_gross"),
-                get(r, "weekly_admissions"),
                 get(r, "screen_count"),
                 get(r, "weeks_in_release"),
-                get(r, "is_italian"),
                 ingestion_run_id,
             )
             for r in records
@@ -59,8 +57,8 @@ class WeeklyBoxOfficeRepository:
         sql = """
             INSERT INTO weekly_box_office (
                 source_name, territory, week_start, week_end, rank, movie_id,
-                external_movie_title, distributor, weekly_gross, weekly_admissions,
-                screen_count, weeks_in_release, is_italian, ingestion_run_id
+                external_movie_title, distributor, weekly_gross,
+                screen_count, weeks_in_release, ingestion_run_id
             )
             VALUES %s
             ON CONFLICT (source_name, territory, week_start, week_end, rank)
@@ -69,10 +67,8 @@ class WeeklyBoxOfficeRepository:
                 external_movie_title = EXCLUDED.external_movie_title,
                 distributor = EXCLUDED.distributor,
                 weekly_gross = EXCLUDED.weekly_gross,
-                weekly_admissions = EXCLUDED.weekly_admissions,
                 screen_count = EXCLUDED.screen_count,
                 weeks_in_release = EXCLUDED.weeks_in_release,
-                is_italian = EXCLUDED.is_italian,
                 ingestion_run_id = EXCLUDED.ingestion_run_id,
                 updated_at = NOW()
         """

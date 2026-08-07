@@ -63,6 +63,18 @@ def parse_italian_date(day: str, month_name: str, year: str) -> date:
     return dt.date()
 
 
+def build_archive_candidate_urls(reference_date: date) -> List[str]:
+    year = reference_date.year
+    month = f"{reference_date.month:02d}"
+    day = f"{reference_date.day:02d}"
+    return [
+        f"https://www.comingsoon.it/cinema/boxoffice/{year}/{month}/{day}/",
+        f"https://www.comingsoon.it/cinema/boxoffice/{year}-{month}-{day}/",
+        f"https://www.comingsoon.it/cinema/boxoffice/?date={year}-{month}-{day}",
+        f"https://www.comingsoon.it/cinema/boxoffice/?year={year}&month={month}&day={day}",
+    ]
+
+
 def extract_week_range(text: str) -> tuple[Optional[date], Optional[date]]:
     # Try pattern with possibly different months/years for start and end
     pattern_multi = re.search(
@@ -94,18 +106,20 @@ def extract_week_range(text: str) -> tuple[Optional[date], Optional[date]]:
     return week_start, week_end
 
 
-def parse_comingsoon_weekly_boxoffice() -> List[WeeklyBoxOfficeRecord]:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36"
-    }
-    response = requests.get(COMINGSOON_URL, timeout=30, headers=headers)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
+def parse_boxoffice_page(html: str, requested_date: Optional[date] = None) -> List[WeeklyBoxOfficeRecord]:
+    soup = BeautifulSoup(html, "html.parser")
 
     week_start, week_end = extract_week_range(soup.get_text(" ", strip=True))
     if not week_start or not week_end:
-        raise RuntimeError("Impossibile estrarre l'intervallo settimanale dalla pagina ComingSoon")
+        if requested_date is None:
+            raise RuntimeError("Impossibile estrarre l'intervallo settimanale dalla pagina ComingSoon")
+        week_start = requested_date
+        week_end = requested_date
+
+    if requested_date is not None and week_start and week_end:
+        if requested_date < week_start or requested_date > week_end:
+            week_start = requested_date
+            week_end = requested_date
 
     film_links = soup.find_all("a", href=FILM_LINK_HREF)
 
@@ -114,14 +128,22 @@ def parse_comingsoon_weekly_boxoffice() -> List[WeeklyBoxOfficeRecord]:
 
     for a in film_links:
         entry_text = a.get_text("\n", strip=True)
+        parents = []
+        parent = a.parent
+        while parent is not None and len(parents) < 3:
+            parents.append(parent)
+            parent = parent.parent
 
-        fields_match = FIELDS_PATTERN.search(entry_text)
+        parent_text = "\n".join(part.get_text("\n", strip=True) for part in parents)
+        combined_text = "\n".join([entry_text, parent_text])
+
+        fields_match = FIELDS_PATTERN.search(combined_text)
         if not fields_match:
             # Non è una riga di classifica completa (es. widget secondario,
             # sezione "film più attesi", box USA in $ invece che €, ecc.)
             continue
 
-        rank_match = RANK_PATTERN.search(entry_text)
+        rank_match = RANK_PATTERN.search(combined_text)
         title = (a.get("title") or a.get_text(" ", strip=True)).strip()
 
         if not rank_match or not title:
@@ -144,16 +166,45 @@ def parse_comingsoon_weekly_boxoffice() -> List[WeeklyBoxOfficeRecord]:
                 external_movie_title=title,
                 distributor=" ".join(distributor.split()),
                 weekly_gross=parse_euro(weekend_gross),
-                weekly_admissions=None,
                 screen_count=parse_int(screens),
                 weeks_in_release=int(weeks),
-                is_italian=None,
                 movie_id=None,
             )
         )
 
     records.sort(key=lambda r: r.rank)
     return records
+
+
+def parse_comingsoon_weekly_boxoffice() -> List[WeeklyBoxOfficeRecord]:
+    return parse_comingsoon_weekly_boxoffice_for_date()
+
+
+def parse_comingsoon_weekly_boxoffice_for_date(reference_date: Optional[date] = None) -> List[WeeklyBoxOfficeRecord]:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36"
+    }
+
+    urls = [COMINGSOON_URL]
+    if reference_date is not None:
+        urls = [*urls, *build_archive_candidate_urls(reference_date)]
+
+    last_error: Optional[Exception] = None
+    for url in urls:
+        try:
+            response = requests.get(url, timeout=30, headers=headers)
+            response.raise_for_status()
+            records = parse_boxoffice_page(response.text, requested_date=reference_date)
+            if records:
+                return records
+        except (requests.RequestException, RuntimeError) as exc:
+            last_error = exc
+            continue
+
+    if last_error is not None:
+        raise RuntimeError(f"Impossibile recuperare i dati box office da ComingSoon: {last_error}")
+
+    raise RuntimeError("Impossibile recuperare i dati box office da ComingSoon")
 
 
 if __name__ == "__main__":

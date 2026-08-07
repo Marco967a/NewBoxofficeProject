@@ -1,7 +1,9 @@
 # app/services/weekly_box_office_service.py
 import logging
+from datetime import date, timedelta
 
 from app.db import get_connection
+from app.parsers.comingsoon_parser import parse_comingsoon_weekly_boxoffice_for_date
 from app.repositories.ingestion_run_repository import IngestionRunRepository
 from app.repositories.movie_repository import MovieRepository
 from app.repositories.weekly_box_office_repository import WeeklyBoxOfficeRepository
@@ -45,10 +47,8 @@ class WeeklyBoxOfficeService:
                             external_movie_title=record.external_movie_title,
                             distributor=record.distributor,
                             weekly_gross=record.weekly_gross,
-                            weekly_admissions=record.weekly_admissions,
                             screen_count=record.screen_count,
                             weeks_in_release=record.weeks_in_release,
-                            is_italian=record.is_italian,
                             movie_id=None,
                         )
                     )
@@ -84,3 +84,20 @@ class WeeklyBoxOfficeService:
                 )
                 logger.exception("Weekly load failed source=%s", source_name)
                 raise
+
+    def load_historical_weekly_records(self, start_date: date, weeks: int, source_name: str = "comingsoon") -> int:
+        if weeks <= 0:
+            return 0
+
+        all_records = []
+        current_date = start_date
+
+        for _ in range(weeks):
+            records_for_date = parse_comingsoon_weekly_boxoffice_for_date(current_date)
+            all_records.extend(records_for_date)
+            current_date = current_date - timedelta(days=7)
+
+        if not all_records:
+            return 0
+
+        return self.load_weekly_records(all_records, source_name=source_name)

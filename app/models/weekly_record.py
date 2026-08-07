@@ -14,8 +14,6 @@ class WeeklyBoxOfficeRecord:
     external_movie_title: str
     distributor: Optional[str] = None
     weekly_gross: Optional[float] = None
-    weekly_admissions: Optional[int] = None
     screen_count: Optional[int] = None
     weeks_in_release: Optional[int] = None
-    is_italian: Optional[bool] = None
     movie_id: Optional[int] = None
