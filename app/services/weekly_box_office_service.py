@@ -53,10 +53,8 @@ class WeeklyBoxOfficeService:
                             external_movie_title=record.external_movie_title,
                             distributor=record.distributor,
                             weekly_gross=record.weekly_gross,
-                            weekly_admissions=record.weekly_admissions,
                             screen_count=record.screen_count,
                             weeks_in_release=record.weeks_in_release,
-                            is_italian=record.is_italian,
                             movie_id=None,
                         )
                     )

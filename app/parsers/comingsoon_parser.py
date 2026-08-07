@@ -157,10 +157,8 @@ def parse_comingsoon_weekly_boxoffice() -> List[WeeklyBoxOfficeRecord]:
                 external_movie_title=title,
                 distributor=" ".join(distributor.split()),
                 weekly_gross=parse_euro(weekend_gross),
-                weekly_admissions=None,
                 screen_count=parse_int(screens),
                 weeks_in_release=int(weeks),
-                is_italian=None,
                 movie_id=None,
             )
         )
