@@ -7,8 +7,8 @@ Questo progetto raccoglie dati settimanali di box office da ComingSoon.it, li no
 
 ## Cambiamenti recenti
 - Il parser `app/parsers/comingsoon_parser.py` è stato migliorato: le date ora sono restitute come `date` (non stringhe), i pattern regex sono più tolleranti e viene aggiunto un `User-Agent` alla richiesta HTTP.
-- La logica di upsert per `weekly_box_office` è stata unificata in `app/db.py::insert_weekly_records`.
-- `app/repositories/weekly_box_office_repository.py` è stato rimosso. `app/services/weekly_box_office_service.WeeklyBoxOfficeService` ora utilizza `insert_weekly_records`.
+- La logica di upsert per `weekly_box_office` è stata centralizzata in `app/repositories/weekly_box_office_repository.py` e riutilizzata dal servizio.
+- È stata aggiunta una suite di test di regressione sotto `tests/` per verificare i casi critici del pipeline weekly.
 
 ## Come eseguire (ambiente di sviluppo)
 1. Crea e attiva l'ambiente virtuale, installa dipendenze (es. `requests`, `beautifulsoup4`, `psycopg2-binary`, `python-dotenv`).
@@ -54,5 +54,6 @@ Nota: su PowerShell si usa `$env:PYTHONPATH="."; python ...` per rendere importa
 - Se desideri ripristinare un'architettura con repository, la query SQL è ora presente in `app/db.py` e `WeeklyBoxOfficeService` la riutilizza.
 
 ## Prossimi passi suggeriti
-- Aggiungere test unitari per `parse_italian_date()` e `extract_week_range()`.
-- Aggiungere logging alla produzione e gestione rate-limit/ritardi per il fetching esterno.
+- Aggiungere test unitari mirati per `parse_italian_date()` e `extract_week_range()`.
+- Aggiungere logging in produzione e gestione rate-limit/ritardi per il fetching esterno.
+- Considerare un refactor del layer CLI per separare meglio script di esecuzione e utility.
