@@ -1,7 +1,14 @@
 import argparse
 import logging
+import sys
 from datetime import date, timedelta
+from pathlib import Path
 from typing import List
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from app.parsers.comingsoon_parser import parse_comingsoon_weekly_boxoffice_for_date
 from app.services.weekly_box_office_service import WeeklyBoxOfficeService
@@ -42,7 +49,6 @@ def main() -> None:
     logger.info("Avvio backfill storico per %s settimane a partire da %s", args.weeks, start_date)
 
     all_records = []
-    successful_weeks = 0
 
     for current_date in dates:
         try:
@@ -51,9 +57,8 @@ def main() -> None:
             if not records:
                 logger.warning("Nessun record recuperato per %s", current_date)
                 continue
-
             all_records.extend(records)
-            successful_weeks += 1
+            all_records.extend(records)
         except Exception as exc:
             logger.exception("Errore durante il recupero della settimana %s: %s", current_date, exc)
 
