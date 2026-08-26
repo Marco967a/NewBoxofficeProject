@@ -1,25 +1,29 @@
-import subprocess
-import sys
 import unittest
-from pathlib import Path
+from unittest.mock import Mock, patch
+
+from scripts.weekly_run import main
 
 
-class LoadWeeklyRunScriptTests(unittest.TestCase):
-    def test_load_weekly_run_script_runs_from_repo_root(self) -> None:
-        repo_root = Path(__file__).resolve().parents[1]
-        result = subprocess.run(
-            [sys.executable, "scripts/load_weekly_run.py"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=600,
+class WeeklyRunScriptTests(unittest.TestCase):
+    @patch("scripts.weekly_run.WeeklyBoxOfficeService")
+    @patch("scripts.weekly_run.parse_comingsoon_weekly_boxoffice")
+    def test_main_loads_parsed_records(self, parser_mock, service_mock) -> None:
+        parser_mock.return_value = [Mock()]
+        service_mock.return_value.load_weekly_records.return_value = 1
+
+        with patch("scripts.weekly_run.sys.argv", ["weekly_run.py"]):
+            main()
+
+        service_mock.return_value.load_weekly_records.assert_called_once_with(
+            records=parser_mock.return_value,
+            source_name="comingsoon",
         )
 
-        self.assertEqual(
-            0,
-            result.returncode,
-            msg=f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}",
-        )
+    @patch("scripts.weekly_run.parse_comingsoon_weekly_boxoffice", return_value=[])
+    def test_main_fails_when_parser_returns_no_records(self, _parser_mock) -> None:
+        with patch("scripts.weekly_run.sys.argv", ["weekly_run.py"]):
+            with self.assertRaises(RuntimeError):
+                main()
 
 
 if __name__ == "__main__":

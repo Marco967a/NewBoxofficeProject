@@ -38,8 +38,10 @@ $env:PYTHONPATH="."; python scripts/bootstrap.py
 5. Esegui il caricamento weekly separatamente:
 
 ```powershell
-$env:PYTHONPATH="."; python scripts/weekly_run.py
+python scripts/weekly_run.py
 ```
+
+Il comando precedente `python scripts/load_weekly_run.py` resta supportato come wrapper compatibile.
 
 6. Verifica il contenuto della tabella:
 
