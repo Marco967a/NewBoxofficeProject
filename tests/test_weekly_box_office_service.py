@@ -22,6 +22,9 @@ class WeeklyBoxOfficeServiceTests(unittest.TestCase):
         self.assertEqual(2, parser_mock.call_count)
         load_weekly_records_mock.assert_called_once()
 
+        loaded_records = load_weekly_records_mock.call_args[0][0]
+        self.assertEqual(2, len(loaded_records))
+
     @patch("app.services.weekly_box_office_service.get_connection")
     @patch("app.services.weekly_box_office_service.WeeklyBoxOfficeRepository")
     @patch("app.services.weekly_box_office_service.MovieRepository")
@@ -60,6 +63,7 @@ class WeeklyBoxOfficeServiceTests(unittest.TestCase):
             external_movie_title="Film Test",
             distributor="Warner Bros. Inc.",
             weekly_gross=1234567.0,
+            total_gross=2345678.0,
             screen_count=600,
             weeks_in_release=4,
         )
@@ -71,6 +75,7 @@ class WeeklyBoxOfficeServiceTests(unittest.TestCase):
         passed_records = mock_weekly_repo.upsert_records.call_args[0][1]
         self.assertEqual(1, len(passed_records))
         self.assertEqual(1234567.0, passed_records[0].weekly_gross)
+        self.assertEqual(2345678.0, passed_records[0].total_gross)
         self.assertEqual(4, passed_records[0].weeks_in_release)
 
 

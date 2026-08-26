@@ -17,3 +17,4 @@ class WeeklyBoxOfficeRecord:
     screen_count: Optional[int] = None
     weeks_in_release: Optional[int] = None
     movie_id: Optional[int] = None
+    total_gross: Optional[float] = None

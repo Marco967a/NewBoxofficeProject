@@ -20,6 +20,7 @@ DB_HOST=localhost
 DB_NAME=boxoffice
 DB_USER=postgres
 DB_PASSWORD=...
+DB_PORT=5432
 ```
 
 3. Inizializza il DB (crea le tabelle):

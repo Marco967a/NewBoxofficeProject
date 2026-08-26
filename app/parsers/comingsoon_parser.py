@@ -166,6 +166,7 @@ def parse_boxoffice_page(html: str, requested_date: Optional[date] = None) -> Li
                 external_movie_title=title,
                 distributor=" ".join(distributor.split()),
                 weekly_gross=parse_euro(weekend_gross),
+                total_gross=parse_euro(total_gross),
                 screen_count=parse_int(screens),
                 weeks_in_release=int(weeks),
                 movie_id=None,

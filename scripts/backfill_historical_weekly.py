@@ -1,16 +1,14 @@
 import argparse
 import logging
 import sys
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
-from typing import List
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.parsers.comingsoon_parser import parse_comingsoon_weekly_boxoffice_for_date
 from app.services.weekly_box_office_service import WeeklyBoxOfficeService
 
 
@@ -29,45 +27,23 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_backfill_dates(start_date: date, weeks: int) -> List[date]:
-    dates: List[date] = []
-    current_date = start_date
-    for _ in range(weeks):
-        dates.append(current_date)
-        current_date = current_date - timedelta(days=7)
-    return dates
-
-
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
     start_date = date.fromisoformat(args.start_date)
     service = WeeklyBoxOfficeService()
-    dates = build_backfill_dates(start_date, args.weeks)
-
     logger.info("Avvio backfill storico per %s settimane a partire da %s", args.weeks, start_date)
 
-    all_records = []
-
-    for current_date in dates:
-        try:
-            logger.info("Recupero settimana %s", current_date)
-            records = parse_comingsoon_weekly_boxoffice_for_date(current_date)
-            if not records:
-                logger.warning("Nessun record recuperato per %s", current_date)
-                continue
-            all_records.extend(records)
-            all_records.extend(records)
-        except Exception as exc:
-            logger.exception("Errore durante il recupero della settimana %s: %s", current_date, exc)
-
-    if not all_records:
-        logger.error("Nessun record recuperato; backfill interrotto")
-        raise SystemExit(1)
-
     try:
-        written = service.load_weekly_records(all_records, source_name=args.source_name)
+        written = service.load_historical_weekly_records(
+            start_date=start_date,
+            weeks=args.weeks,
+            source_name=args.source_name,
+        )
+        if not written:
+            logger.error("Nessun record recuperato; backfill interrotto")
+            raise SystemExit(1)
         logger.info("Backfill completato: %s record caricati", written)
     except Exception as exc:
         logger.exception("Errore durante il caricamento del backfill: %s", exc)

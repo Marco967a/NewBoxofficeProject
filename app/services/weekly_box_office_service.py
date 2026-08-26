@@ -47,6 +47,7 @@ class WeeklyBoxOfficeService:
                             external_movie_title=record.external_movie_title,
                             distributor=record.distributor,
                             weekly_gross=record.weekly_gross,
+                            total_gross=getattr(record, "total_gross", None),
                             screen_count=record.screen_count,
                             weeks_in_release=record.weeks_in_release,
                             movie_id=None,
@@ -91,7 +92,6 @@ class WeeklyBoxOfficeService:
 
         all_records = []
         current_date = start_date
-
         for _ in range(weeks):
             records_for_date = parse_comingsoon_weekly_boxoffice_for_date(current_date)
             all_records.extend(records_for_date)

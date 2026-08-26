@@ -16,6 +16,7 @@ class Settings:
     db_name: str
     db_user: str
     db_password: str
+    db_port: int = 5432
     log_level: str = "INFO"
     request_timeout: int = 30
 
@@ -26,6 +27,7 @@ class Settings:
             "dbname": self.db_name,
             "user": self.db_user,
             "password": self.db_password,
+            "port": self.db_port,
         }
 
 
@@ -36,6 +38,7 @@ def get_settings() -> Settings:
         db_name=os.getenv("DB_NAME", ""),
         db_user=os.getenv("DB_USER", ""),
         db_password=os.getenv("DB_PASSWORD", ""),
+        db_port=int(os.getenv("DB_PORT", "5432")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         request_timeout=int(os.getenv("REQUEST_TIMEOUT", "30")),
     )

@@ -37,6 +37,7 @@ class ComingSoonParserArchiveUrlTests(unittest.TestCase):
         self.assertEqual(date(2024, 2, 2), records[0].week_start)
         self.assertEqual(date(2024, 2, 8), records[0].week_end)
         self.assertEqual(1234567.0, records[0].weekly_gross)
+        self.assertEqual(2345678.0, records[0].total_gross)
         self.assertEqual(4, records[0].weeks_in_release)
 
 

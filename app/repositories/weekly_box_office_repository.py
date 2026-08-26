@@ -16,6 +16,7 @@ class WeeklyBoxOfficeRepository:
                     external_movie_title TEXT NOT NULL,
                     distributor TEXT,
                     weekly_gross NUMERIC(14,2),
+                    total_gross NUMERIC(14,2),
                     weekly_admissions INTEGER,
                     screen_count INTEGER,
                     weeks_in_release INTEGER,
@@ -26,6 +27,10 @@ class WeeklyBoxOfficeRepository:
                     UNIQUE (source_name, territory, week_start, week_end, rank)
                 )
             """)
+            cur.execute(
+                "ALTER TABLE weekly_box_office "
+                "ADD COLUMN IF NOT EXISTS total_gross NUMERIC(14,2)"
+            )
 
     def upsert_records(self, conn, records: list, ingestion_run_id: int | None = None) -> int:
         if not records:
@@ -47,6 +52,7 @@ class WeeklyBoxOfficeRepository:
                 get(r, "external_movie_title"),
                 get(r, "distributor"),
                 get(r, "weekly_gross"),
+                get(r, "total_gross"),
                 get(r, "screen_count"),
                 get(r, "weeks_in_release"),
                 ingestion_run_id,
@@ -58,7 +64,7 @@ class WeeklyBoxOfficeRepository:
             INSERT INTO weekly_box_office (
                 source_name, territory, week_start, week_end, rank, movie_id,
                 external_movie_title, distributor, weekly_gross,
-                screen_count, weeks_in_release, ingestion_run_id
+                total_gross, screen_count, weeks_in_release, ingestion_run_id
             )
             VALUES %s
             ON CONFLICT (source_name, territory, week_start, week_end, rank)
@@ -67,6 +73,7 @@ class WeeklyBoxOfficeRepository:
                 external_movie_title = EXCLUDED.external_movie_title,
                 distributor = EXCLUDED.distributor,
                 weekly_gross = EXCLUDED.weekly_gross,
+                total_gross = EXCLUDED.total_gross,
                 screen_count = EXCLUDED.screen_count,
                 weeks_in_release = EXCLUDED.weeks_in_release,
                 ingestion_run_id = EXCLUDED.ingestion_run_id,
