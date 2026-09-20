@@ -10,3 +10,20 @@ __pycache__/
 
 # Local virtual environments
 .venv/
+venv/
+env/
+
+# Python cache and artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Local databases
+*.sqlite3
+*.db
+
+# IDE/editor files
+.vscode/
+.idea/

@@ -26,7 +26,6 @@ jobs:
 
       - name: Run tests
         run: python -m unittest discover --start-directory tests --verbose
-
   security:
     runs-on: ubuntu-latest
     steps:

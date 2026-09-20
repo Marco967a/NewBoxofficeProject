@@ -20,7 +20,6 @@ class WeeklyBoxOfficeRepository:
                     weekly_admissions INTEGER,
                     screen_count INTEGER,
                     weeks_in_release INTEGER,
-                    is_italian BOOLEAN,
                     ingestion_run_id BIGINT REFERENCES ingestion_runs(id),
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW(),
@@ -31,6 +30,8 @@ class WeeklyBoxOfficeRepository:
                 "ALTER TABLE weekly_box_office "
                 "ADD COLUMN IF NOT EXISTS total_gross NUMERIC(14,2)"
             )
+            cur.execute("ALTER TABLE weekly_box_office DROP COLUMN IF EXISTS weekly_admissions")
+            cur.execute("ALTER TABLE weekly_box_office DROP COLUMN IF EXISTS is_italian")
 
     def upsert_records(self, conn, records: list, ingestion_run_id: int | None = None) -> int:
         if not records:
