@@ -18,16 +18,23 @@ class TMDBClient:
         self.session = requests.Session()
 
     def _get(self, path: str, params: dict | None = None) -> dict:
-        params = params or {}
-        params["api_key"] = self.api_key
+        params = {**(params or {}), "api_key": self.api_key}
 
-        response = self.session.get(
-            f"{self.BASE_URL}{path}",
-            params=params,
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = self.session.get(
+                f"{self.BASE_URL}{path}",
+                params=params,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as exc:
+            # Le eccezioni di requests contengono l'URL completo (api_key inclusa):
+            # le sostituiamo per evitare che la chiave finisca nei log.
+            status = getattr(exc.response, "status_code", None)
+            raise RuntimeError(
+                f"TMDB request failed path={path} status={status} error={type(exc).__name__}"
+            ) from None
 
     def get_top_revenue_movies(self, pages: int = 5) -> list[dict]:
         movies = []

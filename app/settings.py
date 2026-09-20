@@ -31,6 +31,11 @@ class Settings:
         }
 
 
+def get_log_level() -> str:
+    """Legge solo LOG_LEVEL, senza richiedere i segreti obbligatori."""
+    return os.getenv("LOG_LEVEL", "INFO")
+
+
 def get_settings() -> Settings:
     settings = Settings(
         tmdb_api_key=os.getenv("TMDB_API_KEY", ""),

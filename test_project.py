@@ -12,7 +12,7 @@ print("\n[1/5] Configurazione...")
 try:
     from app.settings import get_settings
     settings = get_settings()
-    print(f"  ✓ TMDB API Key: {settings.tmdb_api_key[:10]}...")
+    print("  ✓ TMDB API Key: configurata")
     print(f"  ✓ Database: {settings.db_name}@{settings.db_host}")
     print(f"  ✓ Timeout: {settings.request_timeout}s")
 except Exception as e:
