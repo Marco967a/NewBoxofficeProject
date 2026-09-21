@@ -1,84 +1,111 @@
+import logging
+
 from psycopg2.extras import execute_values
+
+from app.repositories.source_movie_repository import SourceMovieRepository
+
+
+logger = logging.getLogger(__name__)
+
+
+def _get(record, key, default=None):
+    if isinstance(record, dict):
+        return record.get(key, default)
+    return getattr(record, key, default)
 
 
 class WeeklyBoxOfficeRepository:
-    def create_table(self, conn) -> None:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS weekly_box_office (
-                    id BIGSERIAL PRIMARY KEY,
-                    source_name TEXT NOT NULL,
-                    territory TEXT NOT NULL DEFAULT 'IT',
-                    week_start DATE NOT NULL,
-                    week_end DATE NOT NULL,
-                    rank INTEGER NOT NULL,
-                    movie_id INTEGER,
-                    external_movie_title TEXT NOT NULL,
-                    distributor TEXT,
-                    weekly_gross NUMERIC(14,2),
-                    total_gross NUMERIC(14,2),
-                    weekly_admissions INTEGER,
-                    screen_count INTEGER,
-                    weeks_in_release INTEGER,
-                    ingestion_run_id BIGINT REFERENCES ingestion_runs(id),
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW(),
-                    UNIQUE (source_name, territory, week_start, week_end, rank)
-                )
-            """)
-            cur.execute(
-                "ALTER TABLE weekly_box_office "
-                "ADD COLUMN IF NOT EXISTS total_gross NUMERIC(14,2)"
+    def __init__(self, source_movie_repository: SourceMovieRepository | None = None):
+        self.source_movie_repository = source_movie_repository or SourceMovieRepository()
+
+    @staticmethod
+    def _dedupe_by_week_and_title(records: list) -> list:
+        """Un film compare una volta per settimana (chiave naturale): tiene il rank migliore."""
+        kept: dict[tuple, object] = {}
+        for record in sorted(records, key=lambda r: _get(r, "rank") if _get(r, "rank") is not None else 0):
+            key = (
+                _get(record, "source_name"),
+                _get(record, "territory", "IT"),
+                _get(record, "week_start"),
+                _get(record, "external_movie_title"),
             )
-            cur.execute("ALTER TABLE weekly_box_office DROP COLUMN IF EXISTS weekly_admissions")
-            cur.execute("ALTER TABLE weekly_box_office DROP COLUMN IF EXISTS is_italian")
+            if key in kept:
+                logger.warning(
+                    "Titolo duplicato nella stessa settimana, scartato rank=%s: %s",
+                    _get(record, "rank"), key,
+                )
+                continue
+            kept[key] = record
+        return list(kept.values())
 
     def upsert_records(self, conn, records: list, ingestion_run_id: int | None = None) -> int:
         if not records:
             return 0
 
-        def get(r, key, default=None):
-            if isinstance(r, dict):
-                return r.get(key, default)
-            return getattr(r, key, default)
+        records = self._dedupe_by_week_and_title(records)
 
-        rows = [
-            (
-                get(r, "source_name"),
-                get(r, "territory", "IT"),
-                get(r, "week_start"),
-                get(r, "week_end"),
-                get(r, "rank"),
-                get(r, "movie_id"),
-                get(r, "external_movie_title"),
-                get(r, "distributor"),
-                get(r, "weekly_gross"),
-                get(r, "total_gross"),
-                get(r, "screen_count"),
-                get(r, "weeks_in_release"),
-                ingestion_run_id,
+        # Film sorgente (ID ComingSoon) -> riferimento e movie_id già risolto, se esiste.
+        source_refs = self.source_movie_repository.upsert_many(
+            conn,
+            [
+                {
+                    "source_name": _get(r, "source_name"),
+                    "source_movie_id": _get(r, "source_movie_id"),
+                    "title": _get(r, "external_movie_title"),
+                    "url": _get(r, "source_url"),
+                }
+                for r in records
+                if _get(r, "source_movie_id")
+            ],
+        )
+
+        rows = []
+        for r in records:
+            source_movie_id = _get(r, "source_movie_id")
+            ref_id, resolved_movie_id = source_refs.get(
+                (_get(r, "source_name"), str(source_movie_id)), (None, None)
+            ) if source_movie_id else (None, None)
+
+            rows.append(
+                (
+                    _get(r, "source_name"),
+                    _get(r, "territory", "IT"),
+                    _get(r, "week_start"),
+                    _get(r, "week_end"),
+                    _get(r, "rank"),
+                    _get(r, "movie_id") or resolved_movie_id,
+                    ref_id,
+                    _get(r, "external_movie_title"),
+                    _get(r, "distributor"),
+                    _get(r, "weekly_gross"),
+                    _get(r, "total_gross"),
+                    _get(r, "screen_count"),
+                    _get(r, "weeks_in_release"),
+                    ingestion_run_id,
+                )
             )
-            for r in records
-        ]
 
+        # movie_id e source_movie_ref non vengono mai azzerati da un caricamento che non li conosce.
         sql = """
             INSERT INTO weekly_box_office (
-                source_name, territory, week_start, week_end, rank, movie_id,
+                source_name, territory, week_start, week_end, rank, movie_id, source_movie_ref,
                 external_movie_title, distributor, weekly_gross,
                 total_gross, screen_count, weeks_in_release, ingestion_run_id
             )
             VALUES %s
-            ON CONFLICT (source_name, territory, week_start, week_end, rank)
+            ON CONFLICT (source_name, territory, week_start, external_movie_title)
             DO UPDATE SET
-                movie_id = EXCLUDED.movie_id,
-                external_movie_title = EXCLUDED.external_movie_title,
+                week_end = EXCLUDED.week_end,
+                rank = EXCLUDED.rank,
+                movie_id = COALESCE(EXCLUDED.movie_id, weekly_box_office.movie_id),
+                source_movie_ref = COALESCE(EXCLUDED.source_movie_ref, weekly_box_office.source_movie_ref),
                 distributor = EXCLUDED.distributor,
                 weekly_gross = EXCLUDED.weekly_gross,
                 total_gross = EXCLUDED.total_gross,
                 screen_count = EXCLUDED.screen_count,
                 weeks_in_release = EXCLUDED.weeks_in_release,
                 ingestion_run_id = EXCLUDED.ingestion_run_id,
-                updated_at = NOW()
+                updated_at = now()
         """
 
         with conn.cursor() as cur:

@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 from datetime import datetime, date
 from typing import List, Optional, Tuple
 
@@ -29,6 +30,8 @@ MONTHS_IT = {
 # Riconosce il link a una scheda film, es:
 # https://www.comingsoon.it/film/minions-e-monsters/67915/scheda/
 FILM_LINK_HREF = re.compile(r"(?:https?://[^/]+)?/film/[^/]+/\d+/scheda/?$")
+FILM_ID_FROM_HREF = re.compile(r"/film/[^/]+/(\d+)/scheda/?$")
+COMINGSOON_ORIGIN = "https://www.comingsoon.it"
 
 # Cerca solo i campi della card di classifica (etichette semplici, NIENTE markdown).
 # Le card senza "Settimane:"/"Schermi:" (es. widget USA in fondo pagina, altri box)
@@ -124,15 +127,16 @@ def parse_boxoffice_page(html: str, requested_date: Optional[date] = None) -> Li
 
     week_start, week_end = extract_week_range(soup.get_text(" ", strip=True))
     if not week_start or not week_end:
-        if requested_date is None:
-            raise RuntimeError("Impossibile estrarre l'intervallo settimanale dalla pagina ComingSoon")
-        week_start = requested_date
-        week_end = requested_date
+        raise RuntimeError("Impossibile estrarre l'intervallo settimanale dalla pagina ComingSoon")
 
-    if requested_date is not None and week_start and week_end:
-        if requested_date < week_start or requested_date > week_end:
-            week_start = requested_date
-            week_end = requested_date
+    # ComingSoon non ha un archivio consultabile: gli URL con parametri data restituiscono
+    # sempre la classifica corrente. Se la settimana della pagina non contiene la data
+    # richiesta NON dobbiamo rietichettarla (si otterrebbero classifiche clonate con date false).
+    if requested_date is not None and not (week_start <= requested_date <= week_end):
+        raise RuntimeError(
+            f"La pagina ComingSoon riguarda la settimana {week_start}..{week_end}, "
+            f"non contiene la data richiesta {requested_date}"
+        )
 
     film_links = soup.find_all("a", href=FILM_LINK_HREF)
 
@@ -169,6 +173,10 @@ def parse_boxoffice_page(html: str, requested_date: Optional[date] = None) -> Li
 
         weeks, distributor, weekend_gross, screens, total_gross = fields_match.groups()
 
+        href = a.get("href", "")
+        id_match = FILM_ID_FROM_HREF.search(href)
+        source_url = href if href.startswith("http") else f"{COMINGSOON_ORIGIN}{href}"
+
         records.append(
             WeeklyBoxOfficeRecord(
                 source_name="comingsoon",
@@ -183,6 +191,8 @@ def parse_boxoffice_page(html: str, requested_date: Optional[date] = None) -> Li
                 screen_count=parse_int(screens),
                 weeks_in_release=int(weeks),
                 movie_id=None,
+                source_movie_id=id_match.group(1) if id_match else None,
+                source_url=source_url,
             )
         )
 
@@ -194,7 +204,15 @@ def parse_comingsoon_weekly_boxoffice() -> List[WeeklyBoxOfficeRecord]:
     return parse_comingsoon_weekly_boxoffice_for_date()
 
 
-def parse_comingsoon_weekly_boxoffice_for_date(reference_date: Optional[date] = None) -> List[WeeklyBoxOfficeRecord]:
+@dataclass(frozen=True)
+class FetchResult:
+    """Pagina scaricata (URL + HTML grezzo) e record estratti da essa."""
+    url: str
+    html: str
+    records: List[WeeklyBoxOfficeRecord]
+
+
+def fetch_comingsoon_weekly_boxoffice(reference_date: Optional[date] = None) -> FetchResult:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36"
     }
@@ -210,7 +228,7 @@ def parse_comingsoon_weekly_boxoffice_for_date(reference_date: Optional[date] = 
             response.raise_for_status()
             records = parse_boxoffice_page(response.text, requested_date=reference_date)
             if records:
-                return records
+                return FetchResult(url=url, html=response.text, records=records)
         except (requests.RequestException, RuntimeError) as exc:
             last_error = exc
             continue
@@ -219,6 +237,10 @@ def parse_comingsoon_weekly_boxoffice_for_date(reference_date: Optional[date] = 
         raise RuntimeError(f"Impossibile recuperare i dati box office da ComingSoon: {last_error}")
 
     raise RuntimeError("Impossibile recuperare i dati box office da ComingSoon")
+
+
+def parse_comingsoon_weekly_boxoffice_for_date(reference_date: Optional[date] = None) -> List[WeeklyBoxOfficeRecord]:
+    return fetch_comingsoon_weekly_boxoffice(reference_date).records
 
 
 if __name__ == "__main__":

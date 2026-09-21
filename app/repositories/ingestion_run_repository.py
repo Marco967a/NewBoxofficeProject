@@ -1,21 +1,5 @@
 # app/repositories/ingestion_run_repository.py
 class IngestionRunRepository:
-    def create_table(self, conn) -> None:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ingestion_runs (
-                    id BIGSERIAL PRIMARY KEY,
-                    pipeline_name TEXT NOT NULL,
-                    source_name TEXT NOT NULL,
-                    started_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    finished_at TIMESTAMP,
-                    status TEXT NOT NULL,
-                    records_read INTEGER DEFAULT 0,
-                    records_written INTEGER DEFAULT 0,
-                    error_message TEXT
-                )
-            """)
-
     def start_run(self, conn, pipeline_name: str, source_name: str) -> int:
         with conn.cursor() as cur:
             cur.execute("""
@@ -37,7 +21,7 @@ class IngestionRunRepository:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE ingestion_runs
-                SET finished_at = NOW(),
+                SET finished_at = clock_timestamp(),
                     status = %s,
                     records_read = %s,
                     records_written = %s,

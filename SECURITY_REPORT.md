@@ -73,3 +73,27 @@ URL costruiti solo da host fisso + date tipizzate (nessun SSRF), timeout present
 - Contenuto su `preview`: trigger `push` + `pull_request`, `permissions: contents: read` (buono), Python 3.12 con cache pip, install da `requirements.txt`, `unittest discover`. Nessun lint, nessuna analisi di sicurezza, nessun controllo dipendenze/segreti.
 - Su `main` sarebbe comunque fallita (punto 4).
 - **Fix applicato:** aggiunto su `main` un workflow con job `test` e job `security` (bandit + pip-audit). Raccomandati inoltre: Dependabot, secret scanning + push protection dalle impostazioni del repo GitHub, e branch protection su `main` con check richiesti.
+
+## Aggiornamento 2026-09-21: hardening di credenziali e ruoli
+
+**Stato del punto 1 (segreti nella history).** Le credenziali attuali sono diverse da quelle committate e le vecchie sono
+**revocate** (verificato: la vecchia password del database viene rifiutata, la vecchia chiave TMDB risponde 401). La history git
+contiene ancora i valori vecchi, ora innocui. Resta consigliato attivare *Secret scanning* e *Push protection* su GitHub (`gh` non
+era autenticato: passo manuale).
+
+| # | Severità | Problema | Stato |
+|---|----------|----------|-------|
+| 10 | Alta | L'applicazione usava l'unico ruolo esistente, `postgres`, **superutente** (può eseguire comandi sul sistema con `COPY ... PROGRAM` e leggere file del server) | **Corretto**: ruoli `owner`/`app`/`ro`, nessuno superutente |
+| 11 | Alta | Password del database e chiave TMDB in chiaro in `.env`, dentro la cartella del progetto (backup, sincronizzazioni, altri gruppi locali) | **Corretto**: Gestione credenziali di Windows (DPAPI); `.env` senza segreti |
+| 12 | Media | `.env`, `backups/` e `logs/` leggibili per ereditarietà da altri gruppi locali | **Corretto**: permessi limitati a utente, SYSTEM, Administrators (`scripts/harden_permissions.ps1`) |
+| 13 | Media | PostgreSQL in ascolto su tutte le interfacce (`listen_addresses = *`), con la protezione affidata al solo firewall | **Parziale**: `localhost` scritto con `ALTER SYSTEM`, attivo al riavvio del servizio (richiede amministratore) |
+| 14 | Bassa | Chiave TMDB nell'URL (`api_key=`) | **Corretto**: supporto a `Authorization: Bearer` con `tmdb_read_token`; la chiave API resta come ripiego finché non si salva il token |
+| 15 | Bassa | Password dei ruoli visibili nei log del server se un `ALTER ROLE` fallisce | **Corretto**: le password arrivano a PostgreSQL già come hash SCRAM |
+
+**Verifiche eseguite** (sul database reale e su una copia): 23 prove dei permessi tramite `scripts/setup_db_roles.py --verify-only` (l'app non può fare
+`CREATE/DROP/ALTER/TRUNCATE`, `DELETE` su `weekly_box_office`, `COPY ... PROGRAM`, `pg_read_file`; il ruolo `ro` non può scrivere), pipeline, health check, migrazioni,
+backup e attività pianificata funzionanti con i nuovi ruoli, 8 test di integrazione sui ruoli con ruoli temporanei, `bandit` 0 issue, `pip-audit` nessuna vulnerabilità.
+
+**Rischio residuo.** Un programma malevolo che gira con il tuo account può leggere dal deposito le stesse password dell'applicazione: il danno è limitato dai privilegi
+minimi, non azzerato. La password del superutente `postgres` è nel deposito (recuperabile con `manage_secrets.py get db:postgres --show`) e non è usata dall'applicazione:
+conviene conservarla in un gestore di password ed eliminarla dal deposito. Le password dei ruoli si ruotano con `scripts/setup_db_roles.py --rotate`.

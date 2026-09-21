@@ -10,6 +10,32 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # Postgres reale per i test di integrazione (tests/test_db_integration.py): ogni classe di test
+    # crea e distrugge un database temporaneo, quindi serve un utente con CREATEDB (qui: postgres).
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Valori fittizi: nessun segreto reale in CI (il TMDB viene sempre simulato nei test).
+    env:
+      TMDB_API_KEY: ci-dummy-key
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      RUN_DB_TESTS: "1"
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -24,8 +50,14 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run tests (unit + integration on Postgres)
         run: python -m unittest discover --start-directory tests --verbose
+
+      - name: Migrations apply cleanly and are idempotent
+        run: |
+          python scripts/migrate.py
+          python scripts/migrate.py --status
+          python scripts/migrate.py | grep "Schema già aggiornato"
   security:
     runs-on: ubuntu-latest
     steps:

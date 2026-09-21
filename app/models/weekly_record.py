@@ -18,3 +18,6 @@ class WeeklyBoxOfficeRecord:
     weeks_in_release: Optional[int] = None
     movie_id: Optional[int] = None
     total_gross: Optional[float] = None
+    # ID e URL del film presso la sorgente (ComingSoon: /film/<slug>/<id>/scheda/)
+    source_movie_id: Optional[str] = None
+    source_url: Optional[str] = None

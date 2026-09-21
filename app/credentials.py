@@ -1,0 +1,59 @@
+"""Accesso ai segreti: variabile d'ambiente (CI, override) oppure Gestione credenziali di Windows.
+
+Nel deposito (Windows Credential Manager, cifrato con DPAPI e legato all'account utente) i segreti stanno
+sotto il servizio "NewBoxofficeProject" con questi nomi:
+    db:<ruolo>        password del ruolo PostgreSQL (es. db:boxoffice_app)
+    tmdb_api_key      chiave API TMDB
+    tmdb_read_token   API Read Access Token TMDB (preferito: viaggia in un header, non nell'URL)
+
+Nessuna funzione di questo modulo scrive segreti nei log.
+"""
+import logging
+import os
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+SERVICE = "NewBoxofficeProject"
+KNOWN_NAMES = ("tmdb_api_key", "tmdb_read_token")
+
+
+def get_secret(name: str, env_var: Optional[str] = None) -> Optional[str]:
+    """Valore del segreto: prima la variabile d'ambiente `env_var`, poi il deposito. None se assente."""
+    if env_var:
+        value = os.getenv(env_var)
+        if value:
+            return value
+    try:
+        import keyring
+
+        return keyring.get_password(SERVICE, name)
+    except Exception as exc:  # nessun backend (CI, Linux headless) o deposito bloccato: si ripiega su "assente"
+        logger.debug("Deposito segreti non disponibile per '%s': %s", name, type(exc).__name__)
+        return None
+
+
+def set_secret(name: str, value: str) -> None:
+    import keyring
+
+    keyring.set_password(SERVICE, name, value)
+
+
+def delete_secret(name: str) -> bool:
+    import keyring
+    from keyring.errors import PasswordDeleteError
+
+    try:
+        keyring.delete_password(SERVICE, name)
+        return True
+    except PasswordDeleteError:
+        return False
+
+
+def vault_backend_name() -> str:
+    try:
+        import keyring
+
+        return type(keyring.get_keyring()).__name__
+    except Exception:
+        return "nessuno"

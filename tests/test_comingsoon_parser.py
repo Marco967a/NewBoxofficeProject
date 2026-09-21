@@ -40,6 +40,36 @@ class ComingSoonParserArchiveUrlTests(unittest.TestCase):
         self.assertEqual(2345678.0, records[0].total_gross)
         self.assertEqual(4, records[0].weeks_in_release)
 
+    PAGE = """
+    <html><body>
+    <div>dal 2 febbraio 2024 al 8 febbraio 2024</div>
+    <a href="/film/film-test/123/scheda/" title="Film Test">1 Film Test</a>
+    <div>Settimane: 4 Distribuzione: Warner Bros. Inc. weekend: €1.234.567 Schermi: 600 Inc. totale: €2.345.678</div>
+    </body></html>
+    """
+
+    def test_parser_captures_comingsoon_film_id_and_url(self) -> None:
+        records = parse_boxoffice_page(self.PAGE)
+
+        self.assertEqual("123", records[0].source_movie_id)
+        self.assertEqual("https://www.comingsoon.it/film/film-test/123/scheda/", records[0].source_url)
+
+    def test_requested_date_inside_page_week_keeps_real_week(self) -> None:
+        records = parse_boxoffice_page(self.PAGE, requested_date=date(2024, 2, 5))
+
+        self.assertEqual(date(2024, 2, 2), records[0].week_start)
+        self.assertEqual(date(2024, 2, 8), records[0].week_end)
+
+    def test_requested_date_outside_page_week_is_rejected_not_relabelled(self) -> None:
+        # ComingSoon ignora i parametri data e serve sempre la classifica corrente:
+        # rietichettarla creerebbe settimane false.
+        with self.assertRaises(RuntimeError):
+            parse_boxoffice_page(self.PAGE, requested_date=date(2023, 1, 1))
+
+    def test_page_without_week_range_is_rejected_even_with_requested_date(self) -> None:
+        with self.assertRaises(RuntimeError):
+            parse_boxoffice_page("<html><body>niente</body></html>", requested_date=date(2024, 2, 5))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,28 +2,6 @@ from psycopg2.extras import execute_values
 
 
 class MovieRepository:
-    def create_table(self, conn) -> None:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS movies (
-                    id INTEGER PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    release_date DATE,
-                    revenue BIGINT DEFAULT 0,
-                    budget BIGINT DEFAULT 0,
-                    popularity DOUBLE PRECISION DEFAULT 0,
-                    vote_average DOUBLE PRECISION DEFAULT 0,
-                    runtime INTEGER,
-                    original_language TEXT,
-                    genres TEXT,
-                    overview TEXT,
-                    tagline TEXT,
-                    status TEXT,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-
     def _normalize_movie(self, movie: dict) -> tuple:
         genres_str = ", ".join(
             genre["name"] for genre in movie.get("genres", []) if "name" in genre
@@ -43,6 +21,7 @@ class MovieRepository:
             movie.get("overview"),
             movie.get("tagline"),
             movie.get("status"),
+            movie.get("original_title"),
         )
 
     def upsert_movies(self, conn, movies: list[dict]) -> int:
@@ -55,7 +34,7 @@ class MovieRepository:
             INSERT INTO movies (
                 id, title, release_date, revenue, budget,
                 popularity, vote_average, runtime, original_language,
-                genres, overview, tagline, status
+                genres, overview, tagline, status, original_title
             )
             VALUES %s
             ON CONFLICT (id) DO UPDATE SET
@@ -71,6 +50,7 @@ class MovieRepository:
                 overview = EXCLUDED.overview,
                 tagline = EXCLUDED.tagline,
                 status = EXCLUDED.status,
+                original_title = EXCLUDED.original_title,
                 updated_at = NOW()
         """
 

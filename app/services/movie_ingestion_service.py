@@ -1,6 +1,7 @@
 import logging
 
 from app.db import get_connection
+from app.migrations import ensure_schema_current
 from app.repositories.movie_repository import MovieRepository
 from app.tmdb_client import TMDBClient
 
@@ -34,7 +35,7 @@ class MovieIngestionService:
         batch = []
 
         with get_connection() as conn:
-            self.movie_repository.create_table(conn)
+            ensure_schema_current(conn)
 
             for idx, movie_id in enumerate(unique_ids, start=1):
                 try:
