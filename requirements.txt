@@ -1,5 +1,10 @@
-beautifulsoup4>=4.12
-psycopg2-binary>=2.9.9
-python-dotenv>=1.0.1
-requests>=2.32.4
-keyring>=25
+# Limite superiore = major successiva esclusa: aggiorna le patch/minor automaticamente, una major
+# nuova va scelta ed testata di proposito (bump manuale + `python -m unittest discover -s tests`,
+# `RUN_DB_TESTS=1` incluso, prima di alzare il limite). Non c'è un lockfile con hash: per un progetto
+# personale di queste dimensioni un lockfile aggiungerebbe un altro strumento (pip-tools/uv) senza un
+# beneficio proporzionato; se il progetto crescesse, sarebbe il prossimo passo naturale.
+beautifulsoup4>=4.12,<5
+psycopg2-binary>=2.9.9,<3
+python-dotenv>=1.0.1,<2
+requests>=2.32.4,<3
+keyring>=25,<26

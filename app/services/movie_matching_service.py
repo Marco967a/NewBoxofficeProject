@@ -1,6 +1,8 @@
 import logging
 from dataclasses import dataclass, field
 
+import psycopg2
+
 from app.db import get_connection
 from app.matching import (
     REVIEW_MIN_SCORE,
@@ -33,6 +35,9 @@ class MatchSummary:
     no_match: int = 0
     errors: int = 0
     lines: list[str] = field(default_factory=list)
+    # True se il ciclo si è fermato prima di aver provato tutti i film (connessione al DB persa):
+    # a differenza degli errori per singolo film, non ha senso continuare a provare gli altri.
+    stopped_early: bool = False
 
     @property
     def total(self) -> int:
@@ -107,36 +112,56 @@ class MovieMatchingService:
     ) -> MatchSummary:
         summary = MatchSummary()
 
-        with get_connection() as conn:
-            ensure_schema_current(conn)
-            pending = self.source_movie_repository.list_for_matching(conn, source_name, statuses, limit)
-            logger.info("Film da abbinare: %s (stati=%s, dry_run=%s)", len(pending), statuses, dry_run)
+        try:
+            with get_connection() as conn:
+                ensure_schema_current(conn)
+                pending = self.source_movie_repository.list_for_matching(conn, source_name, statuses, limit)
+                logger.info("Film da abbinare: %s (stati=%s, dry_run=%s)", len(pending), statuses, dry_run)
 
-            for item in pending:
-                estimated = (
-                    estimate_italian_release(item["first_week_start"], item["first_weeks_in_release"])
-                    if item["first_week_start"] else None
-                )
-                try:
-                    ranked, decision = self.evaluate(item["title"], estimated)
-                    if not dry_run:
-                        self._persist(conn, item["id"], ranked, decision)
-                        conn.commit()
-                except Exception as exc:
-                    conn.rollback()
-                    summary.errors += 1
-                    summary.lines.append(f"[errore] {item['title']}: {exc}")
-                    logger.warning("Match fallito per '%s': %s", item["title"], exc)
-                    continue
+                for item in pending:
+                    estimated = (
+                        estimate_italian_release(item["first_week_start"], item["first_weeks_in_release"])
+                        if item["first_week_start"] else None
+                    )
+                    try:
+                        ranked, decision = self.evaluate(item["title"], estimated)
+                        if not dry_run:
+                            self._persist(conn, item["id"], ranked, decision)
+                            conn.commit()
+                    except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+                        # Connessione compromessa: gli item successivi darebbero solo lo stesso errore,
+                        # uno per uno. Meglio fermarsi subito e dirlo chiaramente nel riepilogo.
+                        summary.errors += 1
+                        summary.stopped_early = True
+                        summary.lines.append(
+                            f"[errore] connessione al database persa, interrotto dopo {item['title']!r}: {exc}"
+                        )
+                        logger.error("Connessione al database persa durante il matching, interrotto: %s", exc)
+                        break
+                    except Exception as exc:
+                        conn.rollback()
+                        summary.errors += 1
+                        summary.lines.append(f"[errore] {item['title']}: {exc}")
+                        logger.warning("Match fallito per '%s': %s", item["title"], exc)
+                        continue
 
-                setattr(summary, decision.status, getattr(summary, decision.status) + 1)
-                best = decision.best
-                detail = (
-                    f"{best.title!r} ({best.release_date}) tmdb={best.tmdb_id}" if best else "-"
-                )
-                summary.lines.append(
-                    f"[{decision.status}] {item['title']!r} (uscita stimata {estimated}) -> {detail} | {decision.reason}"
-                )
+                    setattr(summary, decision.status, getattr(summary, decision.status) + 1)
+                    best = decision.best
+                    detail = (
+                        f"{best.title!r} ({best.release_date}) tmdb={best.tmdb_id}" if best else "-"
+                    )
+                    summary.lines.append(
+                        f"[{decision.status}] {item['title']!r} (uscita stimata {estimated}) -> {detail} | {decision.reason}"
+                    )
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+            # La connessione era già compromessa: anche commit/chiusura del context manager possono
+            # fallire di nuovo. Il riepilogo parziale va restituito comunque, non perso in un'eccezione.
+            logger.error("Connessione al database persa alla chiusura: %s", exc)
+            if not summary.stopped_early:
+                # Il ciclo era già arrivato in fondo: non è un altro film fallito (non raddoppiare
+                # `errors`), ma vale la pena segnalarlo, perché l'ultimo commit potrebbe non essere
+                # arrivato al server.
+                summary.lines.append(f"[avviso] connessione al database persa alla chiusura: {exc}")
 
         return summary
 

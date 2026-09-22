@@ -126,7 +126,12 @@ def main() -> None:
     p.set_defaults(func=cmd_import_env)
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except RuntimeError as exc:
+        # Guasto del deposito (Credential Manager non raggiungibile/bloccato): messaggio leggibile,
+        # non il traceback grezzo di keyring.
+        raise SystemExit(str(exc))
 
 
 if __name__ == "__main__":

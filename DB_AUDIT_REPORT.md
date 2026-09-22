@@ -178,11 +178,33 @@ via WinRT, AppID di PowerShell già registrato — nessun modulo/dipendenza aggi
 opzionale (`notify_webhook_url` nel deposito credenziali, formato compatibile Slack/Discord). Il messaggio estrae le
 righe più rilevanti del log (errori/traceback). Provato end-to-end: un guasto simulato (DB inesistente, senza
 toccare `boxoffice`) ha prodotto pipeline=1, notifica scritta e letta correttamente, nessun errore nel ramo toast; un
-run pulito su `boxoffice_dev` non ha creato nessun file di notifica. Il toast stesso non è verificabile a schermo da
-qui: chiedere conferma visiva all'utente.
+run pulito su `boxoffice_dev` non ha creato nessun file di notifica. Toast confermato visivamente dall'utente (22/09).
 
 **`listen_addresses`**: già `localhost` e attivo (nessun riavvio in sospeso), con `pg_hba.conf` che comunque limitava
 le connessioni a `127.0.0.1`/`::1` anche quando era `*`. Confermato che la porta 5432 ascolta solo su loopback.
 
-**Non affrontato in questo giro** (rilevanza bassa, fuori dalla richiesta): `get_db_config` che ripiega in silenzio sul
-ruolo app; `set_secret`/`delete_secret` senza try/except; `requirements.txt` senza limite superiore di versione.
+### I quattro punti a bassa rilevanza (2026-09-22)
+
+Nella risposta precedente ne avevo ricontati solo tre (dimenticando il terzo qui sotto); corretti tutti e quattro:
+
+- **`get_db_config` ripiegava in silenzio sul ruolo `app`.** Per `ro` resta così (innecuo: `app` ha comunque i
+  permessi di lettura, e un test lo impone esplicitamente). Per `owner` no: `app/db.py::get_connection("owner")` ora
+  controlla prima se il segreto `db:<owner>` esiste e, se manca, fallisce subito con un `RuntimeError` leggibile
+  invece di connettersi con un ruolo senza DDL e fallire a metà migrazione. Verificato dal vivo (`DB_OWNER_USER`
+  inventato → errore chiaro prima di qualunque connessione; con l'owner reale, invariato).
+- **`set_secret`/`delete_secret` senza try/except.** Ora traducono un guasto del deposito in `RuntimeError`
+  leggibile (con `from exc`, senza perdere la traccia originale); `manage_secrets.py` lo intercetta e lo trasforma
+  in un `SystemExit` pulito invece di un traceback grezzo di `keyring`.
+- **Gestione errori troppo permissiva nel resolver.** `resolve_pending` ora distingue una connessione al database
+  persa (`psycopg2.OperationalError`/`InterfaceError`) — si ferma subito, marca `summary.stopped_early` — da un
+  errore per singolo film (TMDB, dati) — continua con gli altri, come prima. Gestito anche il caso in cui la
+  connessione muoia solo alla chiusura finale (dopo che tutti gli item sono già stati elaborati): il riepilogo
+  parziale viene comunque restituito, non perso in un'eccezione. `resolve_matches.py` stampa un avviso ed esce con
+  1 se si è fermato in anticipo.
+- **`requirements.txt` senza limite superiore.** Aggiunto `<major successiva` a tutte le dipendenze; verificato che
+  l'installazione nel venv reale non cambia nulla (tutte le versioni attuali erano già compatibili). Niente lockfile
+  con hash: aggiungerebbe uno strumento (pip-tools/uv) senza un beneficio proporzionato per queste dimensioni.
+
+Test aggiunti: 14 (unitari, nessuno richiede Postgres). Suite completa: 186 (51 saltati senza `RUN_DB_TESTS=1`, tutti
+verdi con Postgres reale). `bandit` 0 issue, `pip-audit` nessuna vulnerabilità. Verificato anche dal vivo su
+`boxoffice_dev`: `resolve_matches.py` e `manage_secrets.py list` invariati nel funzionamento normale.

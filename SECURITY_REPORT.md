@@ -112,3 +112,15 @@ Fuori dall'ambito stretto della sicurezza, ma legati alla disponibilità del ser
 Il messaggio di notifica non contiene segreti: estrae solo le righe di log con errori/traceback, mai variabili
 d'ambiente o output di `manage_secrets.py`. Il webhook, se configurato, è un URL nel deposito credenziali (stesso
 meccanismo delle password); l'invio è *best effort* e non blocca né fa fallire l'esecuzione.
+
+## Aggiornamento 2026-09-22 (2): gli ultimi quattro punti a bassa rilevanza
+
+| # | Severità | Problema | Stato |
+|---|----------|----------|-------|
+| 18 | Bassa | `get_db_config` ripiegava in silenzio sul ruolo `app` se `owner`/`ro` non erano configurati: per `owner` un fallimento a metà migrazione, poco chiaro | **Corretto**: `get_connection("owner")` fallisce subito con un messaggio leggibile se il ruolo owner non è configurato. Per `ro` il ripiego resta (innocuo, testato) |
+| 19 | Bassa | `set_secret`/`delete_secret` senza gestione degli errori: un guasto del deposito credenziali usciva come traceback grezzo di `keyring` | **Corretto**: tradotto in `RuntimeError` leggibile; `manage_secrets.py` lo trasforma in un messaggio pulito |
+| 20 | Bassa | Il resolver dei match continuava a provare i film successivi anche con la connessione al database persa, riempiendo l'output dello stesso errore ripetuto | **Corretto**: si ferma alla prima perdita di connessione, distinguendola dagli errori per singolo film (TMDB/dati), che invece non fermano il ciclo |
+| 21 | Bassa | `requirements.txt` senza limite superiore di versione: una major nuova poteva installarsi senza preavviso | **Corretto**: limite `<major successiva` su tutte le dipendenze; nessun lockfile con hash (scelta deliberata, sproporzionata per queste dimensioni) |
+
+Nessuno di questi tocca dati segreti o privilegi: sono correzioni di robustezza e diagnosticabilità. Verificati dal
+vivo (ruolo owner mancante → errore immediato; funzionamento normale invariato) e con 14 nuovi test unitari.

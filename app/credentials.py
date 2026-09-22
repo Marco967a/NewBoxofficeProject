@@ -35,9 +35,14 @@ def get_secret(name: str, env_var: Optional[str] = None) -> Optional[str]:
 
 
 def set_secret(name: str, value: str) -> None:
+    """Scrive nel deposito. A differenza di get_secret, un guasto qui NON va inghiottito: è una scrittura,
+    non va fatta credere riuscita se non lo è. Viene solo tradotto in un errore leggibile."""
     import keyring
 
-    keyring.set_password(SERVICE, name, value)
+    try:
+        keyring.set_password(SERVICE, name, value)
+    except Exception as exc:
+        raise RuntimeError(f"Impossibile scrivere '{name}' nel deposito credenziali: {type(exc).__name__}") from exc
 
 
 def delete_secret(name: str) -> bool:
@@ -49,6 +54,8 @@ def delete_secret(name: str) -> bool:
         return True
     except PasswordDeleteError:
         return False
+    except Exception as exc:
+        raise RuntimeError(f"Impossibile eliminare '{name}' dal deposito credenziali: {type(exc).__name__}") from exc
 
 
 def vault_backend_name() -> str:

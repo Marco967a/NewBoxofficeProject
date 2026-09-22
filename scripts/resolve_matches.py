@@ -71,6 +71,12 @@ def main() -> None:
         f"\nTotale {summary.total}: auto={summary.auto} da_rivedere={summary.needs_review} "
         f"senza_match={summary.no_match} errori={summary.errors}" + (" (dry-run)" if args.dry_run else "")
     )
+    if summary.stopped_early:
+        print(
+            "\nATTENZIONE: interrotto prima di aver provato tutti i film in coda (connessione al database "
+            "persa). Riesegui questo comando per riprendere dai film rimasti."
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

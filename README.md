@@ -111,7 +111,7 @@ predefiniti.
 
 | Ruolo | Chi lo usa | Cosa può fare |
 |---|---|---|
-| `boxoffice_owner` | solo `scripts/migrate.py` e `backup_db.py` | proprietario del database e degli oggetti; unico con DDL |
+| `boxoffice_owner` | solo `scripts/migrate.py` e `backup_db.py` | proprietario del database e degli oggetti; unico con DDL — se non è configurato nel deposito, `get_connection(role="owner")` fallisce subito con un messaggio chiaro, invece di provare con un ruolo senza DDL e fallire a metà migrazione |
 | `boxoffice_app` | pipeline, resolver, recupero da Wayback | `SELECT`/`INSERT`/`UPDATE` (e `DELETE` solo su `source_movies` e `match_candidates`); nessun DDL, nessun `TRUNCATE` |
 | `boxoffice_ro` | `health_check.py`, `verify_db.py`, analisi | solo `SELECT` |
 | `boxoffice_test` | test di integrazione locali | può creare database temporanei; nessun accesso al database reale |
@@ -125,6 +125,9 @@ nei log del server.
 `NewBoxofficeProject`: `db:<ruolo>`, `tmdb_api_key`, `tmdb_read_token`. Se una variabile d'ambiente con lo stesso
 scopo è impostata (`DB_PASSWORD`, `TMDB_API_KEY`, `TMDB_READ_TOKEN`) ha la precedenza: serve alla CI. Quindi `.env`, i
 backup, i log e la cartella del progetto non contengono segreti.
+
+Un guasto nella scrittura o cancellazione (deposito non raggiungibile o bloccato) esce con un messaggio leggibile,
+non con il traceback grezzo di `keyring`.
 
 ```powershell
 python scripts/manage_secrets.py list                    # cosa c'è nel deposito (mai i valori)
@@ -148,10 +151,11 @@ si preferisce, conservarla in un gestore di password ed eliminarla dal deposito.
 **Permessi dei file.** `scripts/harden_permissions.ps1` limita `.env`, `backups/` e `logs/` al solo tuo utente (più
 SYSTEM e Administrators): per ereditarietà erano leggibili anche da altri gruppi locali.
 
-**Rete.** PostgreSQL deve ascoltare solo su `localhost` (`listen_addresses = 'localhost'`); il valore è già scritto con
-`ALTER SYSTEM` e diventa attivo al riavvio del servizio, che richiede un PowerShell **come amministratore**:
-`Restart-Service postgresql-x64-18`. Verifica: `Get-NetTCPConnection -LocalPort 5432 -State Listen` deve mostrare solo
-`127.0.0.1` e `::1`.
+**Rete.** PostgreSQL ascolta solo su `localhost` (`listen_addresses = 'localhost'`, attivo e verificato: la porta 5432
+risulta in ascolto solo su `127.0.0.1`/`::1`, controllabile con `Get-NetTCPConnection -LocalPort 5432 -State Listen`).
+Se in futuro serve cambiarlo, richiede `ALTER SYSTEM` più un riavvio del servizio da un PowerShell **come
+amministratore** (`Restart-Service postgresql-x64-18`): la sessione di sviluppo di questo progetto di solito non ha i
+permessi per farlo da sola.
 
 **GitHub.** Attivare a mano *Settings → Code security → Secret scanning* e *Push protection* del repository.
 
@@ -239,6 +243,12 @@ Il match è **automatico** solo se il punteggio è ≥ 0.85 e il migliore ha alm
 tra 0.55 e la soglia va in **revisione** (`needs_review`, con i candidati in `match_candidates`); sotto è `no_match`.
 I match manuali non vengono mai modificati dal resolver. Le righe caricate prima dell'introduzione degli ID
 ComingSoon vengono collegate per titolo (`legacy:<titolo>`), adottando i `movie_id` già presenti.
+
+Se la connessione al database cade a metà elenco, il resolver si ferma subito (non prova gli altri film sulla
+stessa connessione rotta, evitando di riempire l'output con lo stesso errore ripetuto) e segnala con
+`summary.stopped_early`; `resolve_matches.py` in quel caso stampa un avviso ed esce con codice 1, così basta
+rieseguire il comando per riprendere dai film rimasti. Un guasto TMDB o di dati per un singolo film, invece,
+non interrompe gli altri: resta un `[errore]` per quel film e il resolver continua.
 
 8. Verifica il contenuto della tabella e la copertura dei `movie_id`:
 
@@ -434,5 +444,7 @@ con `git show <commit>` o `git log --all --oneline`.
 - ~~Valutare logging e retry con backoff per rate limit o indisponibilità delle sorgenti esterne.~~
   Fatto per TMDB e Wayback (`app/http_retry.py`); ComingSoon (`fetch_comingsoon_weekly_boxoffice`) resta senza retry.
 - Separare ulteriormente le CLI dalle utility di orchestrazione.
-- `requirements.txt` non ha un limite superiore di versione né hash: una major nuova di una dipendenza
-  potrebbe rompere qualcosa senza preavviso (oggi `pip-audit` non segnala vulnerabilità).
+- ~~`requirements.txt` non ha un limite superiore di versione né hash.~~ Aggiunto il limite (`<major successiva`,
+  vedi commento in cima al file): una major nuova va scelta di proposito con un bump manuale, non installata
+  per caso. Resta senza un lockfile con hash: per queste dimensioni aggiungerebbe uno strumento (pip-tools/uv)
+  senza un beneficio proporzionato.

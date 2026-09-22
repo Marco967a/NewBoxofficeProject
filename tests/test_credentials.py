@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from app.credentials import SERVICE, get_secret
+from app.credentials import SERVICE, delete_secret, get_secret, set_secret
 from app.settings import Settings, get_db_config, get_settings
 
 ENV = {
@@ -101,6 +101,37 @@ class DbConfigRoleTests(unittest.TestCase):
         with patch.dict(os.environ, ENV, clear=True), vault({"db:boxoffice_app": "pw-app"}):
             fallback = get_db_config("owner")
         self.assertEqual("boxoffice_app", fallback["user"])
+
+
+class SetAndDeleteSecretTests(unittest.TestCase):
+    def test_set_secret_writes_through_to_keyring(self) -> None:
+        with patch("keyring.set_password") as set_password:
+            set_secret("nome", "valore")
+        set_password.assert_called_once_with(SERVICE, "nome", "valore")
+
+    def test_set_secret_failure_becomes_a_readable_runtime_error(self) -> None:
+        with patch("keyring.set_password", side_effect=OSError("Credential Manager non raggiungibile")):
+            with self.assertRaises(RuntimeError) as ctx:
+                set_secret("nome", "valore")
+        self.assertIn("nome", str(ctx.exception))
+        self.assertIsInstance(ctx.exception.__cause__, OSError)  # traccia originale non persa, solo tradotta
+
+    def test_delete_secret_returns_true_on_success(self) -> None:
+        with patch("keyring.delete_password") as delete_password:
+            self.assertTrue(delete_secret("nome"))
+        delete_password.assert_called_once_with(SERVICE, "nome")
+
+    def test_delete_secret_returns_false_when_absent(self) -> None:
+        from keyring.errors import PasswordDeleteError
+
+        with patch("keyring.delete_password", side_effect=PasswordDeleteError):
+            self.assertFalse(delete_secret("nome"))
+
+    def test_delete_secret_failure_becomes_a_readable_runtime_error(self) -> None:
+        with patch("keyring.delete_password", side_effect=OSError("bloccato")):
+            with self.assertRaises(RuntimeError) as ctx:
+                delete_secret("nome")
+        self.assertIn("nome", str(ctx.exception))
 
 
 if __name__ == "__main__":
