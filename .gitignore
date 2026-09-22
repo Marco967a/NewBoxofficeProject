@@ -33,3 +33,6 @@ backups/
 
 # Log delle esecuzioni pianificate
 logs/
+
+# Export locale per il sito pubblico (va nel repo del sito, non qui)
+site_data/

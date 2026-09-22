@@ -63,6 +63,42 @@ if (Test-Path $notifyOut) {
     }
 }
 
+# Pubblica i KPI sul sito vetrina (repo separato boxoffice-site, cartella sorella di questo repo).
+# export_site_data.py rifiuta di scrivere se l'health check e' in FAIL: in quel caso non c'e' nulla
+# da pubblicare e il sito resta con l'ultimo JSON buono. Un fallimento qui (repo assente, git, rete)
+# non tocca $pipelineExit/$healthExit: e' un guasto del sito vetrina, non della pipeline dati.
+$siteRepo = Join-Path (Split-Path -Parent $repo) "boxoffice-site"
+if (Test-Path $siteRepo) {
+    $siteDataOut = Join-Path $siteRepo "src\data\boxoffice.json"
+    $exportExit = Invoke-Logged "export dati sito" @("scripts\export_site_data.py", "--out", $siteDataOut)
+    if ($exportExit -eq 0) {
+        Push-Location $siteRepo
+        git add "src\data\boxoffice.json" | Out-Null
+        git diff --cached --quiet
+        $hasChanges = -not $?
+        if ($hasChanges) {
+            git commit -m ("Aggiorna KPI box office ({0:yyyy-MM-dd})" -f (Get-Date)) | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                git push | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Add-Content -Path $log -Encoding utf8 -Value ("=== {0:s} sito pubblicato ===" -f (Get-Date))
+                } else {
+                    Add-Content -Path $log -Encoding utf8 -Value ("=== {0:s} push del sito fallito (exit $LASTEXITCODE) ===" -f (Get-Date))
+                }
+            } else {
+                Add-Content -Path $log -Encoding utf8 -Value ("=== {0:s} commit del sito fallito ===" -f (Get-Date))
+            }
+        } else {
+            Add-Content -Path $log -Encoding utf8 -Value ("=== {0:s} sito: nessuna modifica da pubblicare ===" -f (Get-Date))
+        }
+        Pop-Location
+    } else {
+        Add-Content -Path $log -Encoding utf8 -Value ("=== {0:s} export dati sito saltato (health in FAIL) ===" -f (Get-Date))
+    }
+} else {
+    Add-Content -Path $log -Encoding utf8 -Value ("=== {0:s} repo del sito non trovato in {1}: pubblicazione saltata ===" -f (Get-Date), $siteRepo)
+}
+
 # conserva 90 giorni di log
 Get-ChildItem -Path $logDir -Filter "weekly_*.log" |
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-90) } |
