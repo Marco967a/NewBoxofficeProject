@@ -1,6 +1,6 @@
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.db import get_connection
 
@@ -8,43 +8,50 @@ from app.db import get_connection
 ENV = {"DB_HOST": "localhost", "DB_NAME": "boxoffice", "DB_USER": "boxoffice_app", "DB_PORT": "5432"}
 
 
-class GetConnectionOwnerRoleTests(unittest.TestCase):
-    def test_missing_owner_secret_fails_fast_with_a_clear_message_before_connecting(self) -> None:
-        with patch.dict(os.environ, ENV, clear=True), \
-                patch("app.db.get_secret", return_value=None) as get_secret, \
-                patch("app.db.psycopg2.connect") as connect:
-            with self.assertRaises(RuntimeError) as ctx:
-                with get_connection(role="owner"):
-                    pass
+class GetConnectionContractTests(unittest.TestCase):
+    """get_connection è un involucro sottile su psycopg2.connect: qui si verifica solo il contratto
+    commit/rollback/close, non riesercitato altrove."""
 
-        self.assertIn("owner", str(ctx.exception))
-        self.assertIn("setup_db_roles.py", str(ctx.exception))
-        get_secret.assert_called_once_with("db:boxoffice_owner")
-        connect.assert_not_called()  # niente tentativo di connessione: il fallimento è immediato
+    def _mock_connect(self):
+        conn = MagicMock()
+        return patch("app.db.psycopg2.connect", return_value=conn), conn
 
-    def test_configured_owner_role_connects_normally(self) -> None:
-        with patch.dict(os.environ, ENV, clear=True), \
-                patch("app.db.get_secret", return_value="pw-owner"), \
-                patch("app.db.get_db_config", return_value={**ENV, "password": "pw-owner"}) as get_config, \
-                patch("app.db.psycopg2.connect") as connect:
-            with get_connection(role="owner"):
-                pass
+    def test_commits_and_closes_on_success(self) -> None:
+        patcher, conn = self._mock_connect()
+        with patch.dict(os.environ, ENV, clear=True), patcher, \
+                patch("app.settings.get_secret", return_value="pw"):
+            with get_connection() as yielded:
+                self.assertIs(conn, yielded)
 
-        get_config.assert_called_once_with("owner")
-        connect.assert_called_once()
+        conn.commit.assert_called_once()
+        conn.rollback.assert_not_called()
+        conn.close.assert_called_once()
 
-    def test_missing_ro_secret_still_falls_back_silently_to_app(self) -> None:
-        """Per 'ro' il ripiego resta silenzioso: degrada solo i permessi, mai un guasto sorprendente."""
-        with patch.dict(os.environ, ENV, clear=True), \
-                patch("app.db.get_secret", return_value=None) as get_secret, \
-                patch("app.db.get_db_config", return_value={**ENV, "password": "pw-app"}) as get_config, \
-                patch("app.db.psycopg2.connect") as connect:
-            with get_connection(role="ro"):
-                pass
+    def test_rolls_back_and_closes_on_exception_which_still_propagates(self) -> None:
+        patcher, conn = self._mock_connect()
+        with patch.dict(os.environ, ENV, clear=True), patcher, \
+                patch("app.settings.get_secret", return_value="pw"):
+            with self.assertRaises(ValueError):
+                with get_connection():
+                    raise ValueError("boom")
 
-        get_secret.assert_not_called()  # la scorciatoia "owner" non si applica a "ro"
-        get_config.assert_called_once_with("ro")
-        connect.assert_called_once()
+        conn.rollback.assert_called_once()
+        conn.commit.assert_not_called()
+        conn.close.assert_called_once()
+
+    def test_owner_role_falls_back_to_app_when_not_configured_and_still_connects(self) -> None:
+        """Nessun blocco anticipato: se 'owner' non è configurato si ripiega su 'app' (vedi
+        get_db_config), e qui il DDL funziona o fallisce solo quando viene davvero eseguito
+        (app/migrations.py traduce un eventuale errore di permessi in un messaggio leggibile)."""
+        patcher, conn = self._mock_connect()
+        # password dell'app risolta, quella dell'owner no: è il ripiego che si vuole osservare
+        secrets = {"db:boxoffice_app": "pw-app", "db:boxoffice_owner": None}
+        with patch.dict(os.environ, ENV, clear=True), patcher, \
+                patch("app.settings.get_secret", side_effect=lambda name, *a, **k: secrets.get(name)):
+            with get_connection(role="owner") as yielded:
+                self.assertIs(conn, yielded)
+
+        conn.commit.assert_called_once()
 
 
 if __name__ == "__main__":

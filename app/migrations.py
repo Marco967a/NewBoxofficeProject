@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import psycopg2
+
 logger = logging.getLogger(__name__)
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
@@ -73,20 +75,47 @@ def ensure_schema_current(conn) -> None:
         )
 
 
+def _current_user(conn) -> str:
+    # Non una query: dopo un errore di permessi la transazione è già abortita, quindi niente SELECT.
+    return conn.get_dsn_parameters().get("user", "?")
+
+
+def _permission_error(conn, exc: psycopg2.errors.InsufficientPrivilege) -> RuntimeError:
+    """Messaggio comprensibile per un DDL rifiutato per permessi, invece del solo errore Postgres.
+
+    get_db_config("owner") ripiega in silenzio su 'app' quando l'owner non è configurato nel deposito
+    (innocuo se 'app' ha comunque privilegi sufficienti, es. un unico superutente come in CI): qui è
+    dove si scopre se quel ripiego bastava o no.
+    """
+    user = _current_user(conn)
+    error = RuntimeError(
+        f"Il ruolo '{user}' non ha i permessi per creare/modificare tabelle. Se il ruolo owner non è "
+        "ancora configurato nel deposito credenziali, esegui: python scripts/setup_db_roles.py "
+        "(oppure imposta DB_OWNER_USER/DB_OWNER_PASSWORD)."
+    )
+    error.__cause__ = exc
+    return error
+
+
 def apply_pending(conn, directory: Path = MIGRATIONS_DIR) -> list[Migration]:
     """Applica le migrazioni mancanti, una transazione ciascuna. Ritorna quelle applicate."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                checksum TEXT NOT NULL,
-                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    checksum TEXT NOT NULL,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
             )
-            """
-        )
-    conn.commit()
+        conn.commit()
+    except psycopg2.errors.InsufficientPrivilege as exc:
+        error = _permission_error(conn, exc)
+        conn.rollback()
+        raise error
 
     applied_now = []
     for migration in load_migrations(directory):
@@ -108,6 +137,10 @@ def apply_pending(conn, directory: Path = MIGRATIONS_DIR) -> list[Migration]:
                 )
             conn.commit()
             applied_now.append(migration)
+        except psycopg2.errors.InsufficientPrivilege as exc:
+            error = _permission_error(conn, exc)
+            conn.rollback()
+            raise error
         except Exception:
             conn.rollback()
             raise

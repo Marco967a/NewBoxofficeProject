@@ -111,7 +111,7 @@ predefiniti.
 
 | Ruolo | Chi lo usa | Cosa può fare |
 |---|---|---|
-| `boxoffice_owner` | solo `scripts/migrate.py` e `backup_db.py` | proprietario del database e degli oggetti; unico con DDL — se non è configurato nel deposito, `get_connection(role="owner")` fallisce subito con un messaggio chiaro, invece di provare con un ruolo senza DDL e fallire a metà migrazione |
+| `boxoffice_owner` | solo `scripts/migrate.py` e `backup_db.py` | proprietario del database e degli oggetti; unico con DDL — se non è configurato nel deposito si ripiega su `app` (innocuo quando `app` ha comunque privilegi sufficienti, come un unico superutente in CI); se il DDL viene davvero rifiutato per permessi, `app/migrations.py` traduce l'errore in un messaggio chiaro invece di un errore Postgres criptico |
 | `boxoffice_app` | pipeline, resolver, recupero da Wayback | `SELECT`/`INSERT`/`UPDATE` (e `DELETE` solo su `source_movies` e `match_candidates`); nessun DDL, nessun `TRUNCATE` |
 | `boxoffice_ro` | `health_check.py`, `verify_db.py`, analisi | solo `SELECT` |
 | `boxoffice_test` | test di integrazione locali | può creare database temporanei; nessun accesso al database reale |

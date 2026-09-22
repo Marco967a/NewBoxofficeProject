@@ -188,10 +188,16 @@ le connessioni a `127.0.0.1`/`::1` anche quando era `*`. Confermato che la porta
 Nella risposta precedente ne avevo ricontati solo tre (dimenticando il terzo qui sotto); corretti tutti e quattro:
 
 - **`get_db_config` ripiegava in silenzio sul ruolo `app`.** Per `ro` resta così (innecuo: `app` ha comunque i
-  permessi di lettura, e un test lo impone esplicitamente). Per `owner` no: `app/db.py::get_connection("owner")` ora
-  controlla prima se il segreto `db:<owner>` esiste e, se manca, fallisce subito con un `RuntimeError` leggibile
-  invece di connettersi con un ruolo senza DDL e fallire a metà migrazione. Verificato dal vivo (`DB_OWNER_USER`
-  inventato → errore chiaro prima di qualunque connessione; con l'owner reale, invariato).
+  permessi di lettura, e un test lo impone esplicitamente). Per `owner` il primo tentativo (controllare in anticipo
+  se `db:<owner>` esiste nel deposito, e fallire subito se manca) **ha rotto la CI**: lì non esiste un ruolo owner
+  separato, si usa `postgres` per tutto, e il ripiego silenzioso su `app` funzionava benissimo (un solo superutente
+  ha già tutti i permessi). Il controllo anticipato presumeva "nessun segreto owner = DDL impossibile", il che è
+  falso quando il ruolo di ripiego ha comunque i privilegi. Corretto spostando il controllo dove serve davvero:
+  `app/migrations.py::apply_pending` ora intercetta `psycopg2.errors.InsufficientPrivilege` sul DDL e lo traduce in
+  un `RuntimeError` leggibile (ruolo coinvolto + `setup_db_roles.py`), senza toccare i casi in cui il ripiego basta.
+  Verificato dal vivo in entrambi i sensi: un database nuovo con solo il ruolo `boxoffice_app` (senza DDL) e nessun
+  owner configurato dà ora il messaggio chiaro; lo stesso scenario con `postgres` (un solo ruolo per tutto, come in
+  CI) applica le 7 migrazioni senza problemi.
 - **`set_secret`/`delete_secret` senza try/except.** Ora traducono un guasto del deposito in `RuntimeError`
   leggibile (con `from exc`, senza perdere la traccia originale); `manage_secrets.py` lo intercetta e lo trasforma
   in un `SystemExit` pulito invece di un traceback grezzo di `keyring`.
@@ -208,3 +214,15 @@ Nella risposta precedente ne avevo ricontati solo tre (dimenticando il terzo qui
 Test aggiunti: 14 (unitari, nessuno richiede Postgres). Suite completa: 186 (51 saltati senza `RUN_DB_TESTS=1`, tutti
 verdi con Postgres reale). `bandit` 0 issue, `pip-audit` nessuna vulnerabilità. Verificato anche dal vivo su
 `boxoffice_dev`: `resolve_matches.py` e `manage_secrets.py list` invariati nel funzionamento normale.
+
+### Regressione in CI e correzione (stesso giorno, 22/09)
+
+Il commit con i quattro fix sopra, una volta pubblicato, ha fatto fallire la CI su GitHub (job `test`, passo
+migrazioni): il controllo anticipato sul ruolo owner presumeva un segreto nel deposito che in CI non esiste, perché
+lì `DB_USER=postgres` è già un superutente usato per tutto, senza ruoli separati. La stessa cosa vale per chi non ha
+ancora eseguito `setup_db_roles.py` in locale. Corretto spostando il controllo dal momento della connessione (prima
+di sapere se serviva davvero) al momento del DDL vero e proprio (`app/migrations.py`, cattura
+`psycopg2.errors.InsufficientPrivilege`): non cambia nulla quando il ripiego basta, dà un messaggio chiaro quando non
+basta. 5 nuovi test (2 in `tests/test_db.py`, riscritto perché testava il comportamento rimosso; 3 nuovi in
+`tests/test_migrations_permissions.py`), più le due verifiche dal vivo del punto precedente. Suite: 191 test, tutti
+verdi. Pubblicato in un commit correttivo separato subito dopo, con la CI ripassata.
