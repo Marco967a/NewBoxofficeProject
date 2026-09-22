@@ -53,7 +53,6 @@ scripts/
 ├── bootstrap.py     Carica i film da TMDB
 ├── weekly_run.py    Carica la classifica weekly da ComingSoon
 ├── resolve_matches.py  Collega i film della classifica ai film TMDB (movie_id)
-├── load_weekly_run.py  CLI weekly con opzione --dry-run
 ├── migrate.py       Applica le migrazioni (ruolo owner) e riapplica i privilegi (--status per lo stato)
 ├── recover_from_wayback.py  Recupera da Wayback le settimane mancanti
 ├── health_check.py  Controlli di salute e qualità (esce con 1 se c'è un FAIL)
@@ -62,8 +61,9 @@ scripts/
 ├── setup_db_roles.py  Crea i ruoli a privilegi minimi e ne verifica i permessi
 ├── backup_db.py     Backup con pg_dump in backups/
 ├── harden_permissions.ps1  Limita i permessi di .env, backups e logs al solo utente
-├── run_weekly.ps1   Esecuzione non presidiata: pipeline + health check, con log
+├── run_weekly.ps1   Esecuzione non presidiata: pipeline + health check + pubblicazione sul sito, con log
 ├── register_weekly_task.ps1  Registra/rimuove l'attività pianificata di Windows
+├── export_site_data.py  Esporta i KPI per il sito vetrina (boxoffice-site), niente se l'health check è in FAIL
 └── verify_db.py     Verifica i dati nel database
 migrations/          Migrazioni SQL numerate (001_baseline.sql, ...)
 init_db.py           Alias di scripts/migrate.py
@@ -204,8 +204,6 @@ python scripts/bootstrap.py   # opzionale: top film per incasso mondiale
 ```powershell
 python scripts/weekly_run.py
 ```
-
-Il comando precedente `python scripts/load_weekly_run.py` resta supportato come wrapper compatibile.
 
 6. Backfill storico (**limitato**): ComingSoon non ha un archivio consultabile e ignora i
    parametri data, servendo sempre la classifica corrente. Il backfill carica quindi solo le

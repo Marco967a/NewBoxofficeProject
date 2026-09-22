@@ -12,8 +12,6 @@ from typing import Callable, Optional
 
 import requests
 
-from app.http_retry import DEFAULT_RETRY_STATUSES as RETRY_STATUSES
-from app.http_retry import DEFAULT_RETRY_WAITS as RETRY_WAITS
 from app.http_retry import get_with_retry
 from app.parsers.comingsoon_parser import FetchResult, parse_boxoffice_page
 
