@@ -12,6 +12,9 @@ from typing import Callable, Optional
 
 import requests
 
+from app.http_retry import DEFAULT_RETRY_STATUSES as RETRY_STATUSES
+from app.http_retry import DEFAULT_RETRY_WAITS as RETRY_WAITS
+from app.http_retry import get_with_retry
 from app.parsers.comingsoon_parser import FetchResult, parse_boxoffice_page
 
 logger = logging.getLogger(__name__)
@@ -22,26 +25,11 @@ USER_AGENT = "NewBoxofficeProject-recovery/1.0 (progetto personale, poche richie
 
 MIN_ROWS = 10  # sotto questa soglia una classifica è considerata incompleta
 CDX_TIMEOUT = 180  # l'indice CDX è spesso lento
-RETRY_STATUSES = {429, 500, 502, 503, 504}
-RETRY_WAITS = (5, 15, 45)  # secondi prima dei tentativi successivi al primo
 
 
 def _get(session: requests.Session, url: str, sleep: Callable[[float], None] = time.sleep, **kwargs) -> requests.Response:
     """GET con qualche tentativo e attese crescenti: Wayback risponde spesso 503/timeout in modo transitorio."""
-    for attempt in range(len(RETRY_WAITS) + 1):
-        try:
-            response = session.get(url, headers={"User-Agent": USER_AGENT}, **kwargs)
-            if response.status_code not in RETRY_STATUSES:
-                response.raise_for_status()
-                return response
-            error: Exception = requests.HTTPError(f"HTTP {response.status_code}", response=response)
-        except (requests.Timeout, requests.ConnectionError) as exc:
-            error = exc
-        if attempt == len(RETRY_WAITS):
-            raise error
-        logger.warning("Wayback: %s, riprovo tra %ss", type(error).__name__, RETRY_WAITS[attempt])
-        sleep(RETRY_WAITS[attempt])
-    raise AssertionError("non raggiungibile")  # pragma: no cover
+    return get_with_retry(session, url, sleep=sleep, headers={"User-Agent": USER_AGENT}, log_label="Wayback", **kwargs)
 
 
 def list_snapshots(url: str, start: date, end: date, session: Optional[requests.Session] = None) -> list[str]:

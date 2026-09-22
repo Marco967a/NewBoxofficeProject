@@ -151,3 +151,38 @@ secret scanning con push protection su GitHub.
 - L'attività pianificata funziona con i nuovi ruoli (letta dal deposito, risultato 0). Test: 143 (unitari + integrazione), CI simulata senza deposito.
 - **Da fare a mano**: riavvio del servizio PostgreSQL come amministratore (`Restart-Service postgresql-x64-18`) per attivare `listen_addresses = 'localhost'`;
   attivare secret scanning e push protection su GitHub; opzionale: salvare `tmdb_read_token` (`manage_secrets.py set tmdb_read_token`).
+
+### Analisi generale e correzioni mirate (2026-09-22)
+
+Riletto tutto il codice da zero (non solo quanto toccato nelle sessioni precedenti). Trovati e corretti, nei limiti del
+possibile, i tre problemi a rilevanza media:
+
+- **Python 3.14 in locale (venv, attività pianificata) vs 3.12 in CI**: disallineamento che rendeva "i test passano"
+  non equivalente nei due posti. CI allineata a 3.14 (`.github/workflows/ci.yml`), stessa versione del runtime reale.
+- **Chiave naturale di `weekly_box_office` senza normalizzazione**: `(source_name, territory, week_start,
+  external_movie_title)` confrontava lettera per lettera. Migrazione 007: colonna generata `title_key =
+  lower(btrim(external_movie_title))`, nuovo vincolo su quella, dedup difensivo delle righe già esistenti (0 gruppi
+  trovati in produzione). Il repository ora normalizza allo stesso modo prima dell'INSERT (necessario: Postgres
+  rifiuta un batch con due righe che risolvono allo stesso target di conflitto) e aggiorna `external_movie_title`
+  sull'upsert, cosi' l'ultima grafia vista resta quella salvata.
+- **Nessun retry su TMDB**: `app/http_retry.py` (nuovo, condiviso con `app/wayback.py` che usava già lo stesso
+  schema) riprova su 429/5xx/timeout con attese crescenti (5s, 15s, 45s) invece di segnare subito il film come errore.
+
+Verificato tutto su una copia/i database reali prima e dopo: backup (`boxoffice_pre_007_*.dump`), migrazione applicata
+a `boxoffice` e `boxoffice_dev` (136 righe invariate, nessun duplicato), un `weekly_run.py` reale post-migrazione per
+confermare il nuovo `ON CONFLICT` in produzione. Test: 154 (unitari + integrazione su Postgres reale), `bandit` 0 issue.
+
+**Notifica sui guasti** (`app/notifications.py`, `scripts/notify.py`, integrata in `run_weekly.ps1`): niente per i
+soli WARN (stessa soglia di `health_check.py`); su un guasto vero, notifica desktop (Centro notifiche di Windows,
+via WinRT, AppID di PowerShell già registrato — nessun modulo/dipendenza aggiuntivi) sempre tentata, più un webhook
+opzionale (`notify_webhook_url` nel deposito credenziali, formato compatibile Slack/Discord). Il messaggio estrae le
+righe più rilevanti del log (errori/traceback). Provato end-to-end: un guasto simulato (DB inesistente, senza
+toccare `boxoffice`) ha prodotto pipeline=1, notifica scritta e letta correttamente, nessun errore nel ramo toast; un
+run pulito su `boxoffice_dev` non ha creato nessun file di notifica. Il toast stesso non è verificabile a schermo da
+qui: chiedere conferma visiva all'utente.
+
+**`listen_addresses`**: già `localhost` e attivo (nessun riavvio in sospeso), con `pg_hba.conf` che comunque limitava
+le connessioni a `127.0.0.1`/`::1` anche quando era `*`. Confermato che la porta 5432 ascolta solo su loopback.
+
+**Non affrontato in questo giro** (rilevanza bassa, fuori dalla richiesta): `get_db_config` che ripiega in silenzio sul
+ruolo app; `set_secret`/`delete_secret` senza try/except; `requirements.txt` senza limite superiore di versione.

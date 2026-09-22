@@ -14,20 +14,32 @@ def _get(record, key, default=None):
     return getattr(record, key, default)
 
 
+def _title_key(title) -> str:
+    """Normalizzazione equivalente alla colonna generata title_key (migrazione 007, lower(btrim(...))).
+    Deve restare allineata a quella: altrimenti due righe "duplicate" per Python nello stesso batch
+    potrebbero non esserlo per Postgres (o viceversa). btrim() toglie solo spazi ASCII, str.strip()
+    anche altri spazi Unicode: differenza innocua qui, perché il parser passa titoli già ripuliti."""
+    return (title or "").strip().lower()
+
+
 class WeeklyBoxOfficeRepository:
     def __init__(self, source_movie_repository: SourceMovieRepository | None = None):
         self.source_movie_repository = source_movie_repository or SourceMovieRepository()
 
     @staticmethod
     def _dedupe_by_week_and_title(records: list) -> list:
-        """Un film compare una volta per settimana (chiave naturale): tiene il rank migliore."""
+        """Un film compare una volta per settimana (chiave naturale, normalizzata come title_key nel DB:
+        due righe dello stesso batch che differiscono solo per spazi/maiuscole vanno unite qui, altrimenti
+        Postgres rifiuta l'INSERT con "ON CONFLICT DO UPDATE command cannot affect row a second time").
+        Tiene il rank migliore.
+        """
         kept: dict[tuple, object] = {}
         for record in sorted(records, key=lambda r: _get(r, "rank") if _get(r, "rank") is not None else 0):
             key = (
                 _get(record, "source_name"),
                 _get(record, "territory", "IT"),
                 _get(record, "week_start"),
-                _get(record, "external_movie_title"),
+                _title_key(_get(record, "external_movie_title")),
             )
             if key in kept:
                 logger.warning(
@@ -93,10 +105,11 @@ class WeeklyBoxOfficeRepository:
                 total_gross, screen_count, weeks_in_release, ingestion_run_id
             )
             VALUES %s
-            ON CONFLICT (source_name, territory, week_start, external_movie_title)
+            ON CONFLICT (source_name, territory, week_start, title_key)
             DO UPDATE SET
                 week_end = EXCLUDED.week_end,
                 rank = EXCLUDED.rank,
+                external_movie_title = EXCLUDED.external_movie_title,
                 movie_id = COALESCE(EXCLUDED.movie_id, weekly_box_office.movie_id),
                 source_movie_ref = COALESCE(EXCLUDED.source_movie_ref, weekly_box_office.source_movie_ref),
                 distributor = EXCLUDED.distributor,

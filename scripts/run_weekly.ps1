@@ -24,9 +24,44 @@ function Invoke-Logged([string]$title, [string[]]$pythonArgs) {
     return $LASTEXITCODE
 }
 
+# Notifica desktop sui guasti (Action Center di Windows). Usa l'AppID gia' registrato di PowerShell,
+# cosi' non serve un collegamento nel menu Start per un AppID personalizzato.
+function Show-ToastNotification([string]$Title, [string]$Message) {
+    [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+    [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null
+
+    $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+    $textNodes = $template.GetElementsByTagName("text")
+    $textNodes.Item(0).AppendChild($template.CreateTextNode($Title)) | Out-Null
+    $textNodes.Item(1).AppendChild($template.CreateTextNode($Message)) | Out-Null
+
+    $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+    $appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+    [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)
+}
+
 $pipelineExit = Invoke-Logged "pipeline (weekly + match)" @("main_v3.py")
 $healthExit = Invoke-Logged "health check" @("scripts\health_check.py")
 Add-Content -Path $log -Encoding utf8 -Value ("=== {0:s} fine: pipeline={1} health={2} ===" -f (Get-Date), $pipelineExit, $healthExit)
+
+# Notifica solo sui guasti veri (health_check.py esce 0 sui soli WARN): notify.py decide se c'e'
+# qualcosa da segnalare e, in tal caso, prova anche un webhook opzionale (deposito credenziali /
+# NOTIFY_WEBHOOK_URL). Il messaggio passa da un file UTF-8 (mai dalla cattura diretta dell'output di
+# un processo figlio: PowerShell 5.1 la decodifica con la codepage di sistema, non UTF-8).
+$notifyOut = Join-Path $logDir ("notify_{0:yyyyMMdd_HHmmss}.txt" -f (Get-Date))
+Invoke-Logged "notifica" @("scripts\notify.py", "--pipeline-exit", "$pipelineExit", "--health-exit", "$healthExit", "--log", $log, "--out", $notifyOut) | Out-Null
+if (Test-Path $notifyOut) {
+    try {
+        $notifyMessage = Get-Content -Path $notifyOut -Encoding UTF8 -Raw
+        if ($notifyMessage) {
+            Show-ToastNotification -Title "NewBoxOffice: guasto nella pipeline settimanale" -Message $notifyMessage
+        }
+    } catch {
+        Add-Content -Path $log -Encoding utf8 -Value ("=== notifica desktop fallita: {0} ===" -f $_.Exception.Message)
+    } finally {
+        Remove-Item -Path $notifyOut -Force -ErrorAction SilentlyContinue
+    }
+}
 
 # conserva 90 giorni di log
 Get-ChildItem -Path $logDir -Filter "weekly_*.log" |

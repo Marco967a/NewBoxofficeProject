@@ -86,7 +86,7 @@ era autenticato: passo manuale).
 | 10 | Alta | L'applicazione usava l'unico ruolo esistente, `postgres`, **superutente** (può eseguire comandi sul sistema con `COPY ... PROGRAM` e leggere file del server) | **Corretto**: ruoli `owner`/`app`/`ro`, nessuno superutente |
 | 11 | Alta | Password del database e chiave TMDB in chiaro in `.env`, dentro la cartella del progetto (backup, sincronizzazioni, altri gruppi locali) | **Corretto**: Gestione credenziali di Windows (DPAPI); `.env` senza segreti |
 | 12 | Media | `.env`, `backups/` e `logs/` leggibili per ereditarietà da altri gruppi locali | **Corretto**: permessi limitati a utente, SYSTEM, Administrators (`scripts/harden_permissions.ps1`) |
-| 13 | Media | PostgreSQL in ascolto su tutte le interfacce (`listen_addresses = *`), con la protezione affidata al solo firewall | **Parziale**: `localhost` scritto con `ALTER SYSTEM`, attivo al riavvio del servizio (richiede amministratore) |
+| 13 | Media | PostgreSQL in ascolto su tutte le interfacce (`listen_addresses = *`), con la protezione affidata al solo firewall | **Corretto** (2026-09-22): servizio riavviato, `listen_addresses = 'localhost'` attivo, verificato che la 5432 ascolta solo su 127.0.0.1/::1. `pg_hba.conf` limitava comunque le connessioni al solo loopback già prima del riavvio |
 | 14 | Bassa | Chiave TMDB nell'URL (`api_key=`) | **Corretto**: supporto a `Authorization: Bearer` con `tmdb_read_token`; la chiave API resta come ripiego finché non si salva il token |
 | 15 | Bassa | Password dei ruoli visibili nei log del server se un `ALTER ROLE` fallisce | **Corretto**: le password arrivano a PostgreSQL già come hash SCRAM |
 
@@ -97,3 +97,18 @@ backup e attività pianificata funzionanti con i nuovi ruoli, 8 test di integraz
 **Rischio residuo.** Un programma malevolo che gira con il tuo account può leggere dal deposito le stesse password dell'applicazione: il danno è limitato dai privilegi
 minimi, non azzerato. La password del superutente `postgres` è nel deposito (recuperabile con `manage_secrets.py get db:postgres --show`) e non è usata dall'applicazione:
 conviene conservarla in un gestore di password ed eliminarla dal deposito. Le password dei ruoli si ruotano con `scripts/setup_db_roles.py --rotate`.
+
+## Aggiornamento 2026-09-22: chiusura punto 13, resilienza e osservabilità
+
+Il punto 13 (`listen_addresses`) è chiuso: verificato che la porta 5432 ascolta solo su `127.0.0.1`/`::1`.
+
+Fuori dall'ambito stretto della sicurezza, ma legati alla disponibilità del servizio:
+
+| # | Severità | Problema | Stato |
+|---|----------|----------|-------|
+| 16 | Bassa | Nessun retry su TMDB: un 429 (rate limit) o un 5xx transitorio marcava subito un film come "errore" | **Corretto**: `app/http_retry.py` (condiviso con Wayback), attese crescenti 5/15/45s |
+| 17 | Bassa | Nessuna notifica sui guasti della pipeline non presidiata: si vedevano solo aprendo log/Utilità di pianificazione | **Corretto**: notifica desktop (WinRT, sempre tentata) + webhook opzionale (`notify_webhook_url`), solo sui guasti veri (non sui WARN) |
+
+Il messaggio di notifica non contiene segreti: estrae solo le righe di log con errori/traceback, mai variabili
+d'ambiente o output di `manage_secrets.py`. Il webhook, se configurato, è un URL nel deposito credenziali (stesso
+meccanismo delle password); l'invio è *best effort* e non blocca né fa fallire l'esecuzione.

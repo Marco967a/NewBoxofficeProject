@@ -43,6 +43,8 @@ app/
 ├── roles.py         Ruoli PostgreSQL a privilegi minimi, grant e verifica
 ├── migrations.py    Runner delle migrazioni SQL
 ├── health.py        Controlli di salute e qualità sul database
+├── notifications.py Messaggio e invio webhook per i guasti della pipeline
+├── http_retry.py    GET con retry/backoff su errori transitori (TMDB, Wayback)
 ├── matching.py      Punteggio e decisione dei match (logica pura)
 ├── validation.py    Controlli di qualità sui record weekly
 ├── settings.py      Configurazione (.env per i valori non segreti)
@@ -55,6 +57,7 @@ scripts/
 ├── migrate.py       Applica le migrazioni (ruolo owner) e riapplica i privilegi (--status per lo stato)
 ├── recover_from_wayback.py  Recupera da Wayback le settimane mancanti
 ├── health_check.py  Controlli di salute e qualità (esce con 1 se c'è un FAIL)
+├── notify.py        Notifica desktop/webhook sui guasti (chiamato da run_weekly.ps1)
 ├── manage_secrets.py  Gestione dei segreti nel deposito credenziali
 ├── setup_db_roles.py  Crea i ruoli a privilegi minimi e ne verifica i permessi
 ├── backup_db.py     Backup con pg_dump in backups/
@@ -80,7 +83,7 @@ si popola solo con i film che compaiono davvero nelle classifiche italiane.
 
 ## Prerequisiti
 
-- Python 3.12 consigliato (la CI usa Python 3.12).
+- Python 3.14 consigliato (la CI usa Python 3.14, per restare allineata all'ambiente locale).
 - PostgreSQL raggiungibile dall'ambiente di esecuzione.
 - Una chiave API TMDB per il bootstrap dei film.
 
@@ -261,8 +264,25 @@ Start-ScheduledTask -TaskName "NewBoxOffice-WeeklyRun"   # avvio manuale
 L'attività gira come l'utente corrente **solo con la sessione aperta**, senza privilegi elevati né password salvata;
 se il PC era spento all'ora prevista parte appena possibile (`StartWhenAvailable`). Ogni esecuzione scrive un log in
 `logs/weekly_<data>.log` (conservati 90 giorni, cartella ignorata da git). Il codice di uscita è quello della pipeline
-(o dell'health check): compare come «Ultimo risultato» nell'Utilità di pianificazione. Non ci sono notifiche attive:
-i guasti si vedono lì, nel log e con `health_check.py`.
+(o dell'health check): compare come «Ultimo risultato» nell'Utilità di pianificazione.
+
+### Notifica sui guasti
+
+Dopo pipeline e health check, `run_weekly.ps1` chiama `scripts/notify.py`, che non fa nulla se non c'è nessun guasto
+(coerente con `health_check.py`: i soli WARN — es. le settimane storiche già note come perse — non generano notifiche
+a ogni esecuzione). Se la pipeline esce con un codice diverso da 0 o l'health check trova un FAIL:
+
+- **notifica desktop** (Centro notifiche di Windows), sempre tentata: funziona quando l'attività gira (sessione
+  aperta), senza configurazione;
+- **webhook** opzionale, se è configurato il segreto `notify_webhook_url` (formato compatibile con Slack e Discord):
+
+```powershell
+python scripts/manage_secrets.py set notify_webhook_url
+```
+
+Il messaggio include le righe più rilevanti del log (errori/traceback, o le ultime righe se non ce ne sono). Un
+guasto nella notifica stessa non fa fallire `run_weekly.ps1` né nasconde il guasto originale: viene solo annotato nel
+log.
 
 ### Controlli di salute
 
@@ -335,8 +355,15 @@ $env:RUN_DB_TESTS = "1"; python -m unittest tests.test_db_integration -v
 Il workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) esegue la suite a ogni push e pull request
 con un **servizio Postgres 18** e `RUN_DB_TESTS=1`, quindi anche i test di integrazione girano in CI (con valori
 fittizi: nessun segreto reale). Poi verifica che le migrazioni si applichino da zero e siano idempotenti, ed esegue
-`bandit` e `pip-audit`. Installa le dipendenze di [`requirements.txt`](requirements.txt), usa il caching di pip e
-limita i permessi del job alla sola lettura del repository.
+`bandit` e `pip-audit`. Usa **Python 3.14**, la stessa versione dell'ambiente locale (compresa l'attività
+pianificata): versioni diverse tra CI e locale vorrebbero dire che "i test passano" non garantisce la stessa cosa
+nei due posti. Installa le dipendenze di [`requirements.txt`](requirements.txt), usa il caching di pip e limita i
+permessi del job alla sola lettura del repository.
+
+**La CI gira solo su GitHub**, non in locale: il workflow non è uno script ma un file YAML che orchestra una macchina
+Linux e un container Postgres usa-e-getta forniti da GitHub. In locale si può eseguire lo stesso comando dei test e,
+separatamente, `bandit`/`pip-audit`, ma non il file YAML in sé: per farlo servirebbe Docker Desktop e lo strumento
+[`act`](https://github.com/nektos/act) (non installati su questa macchina).
 
 ## Schema dati
 
@@ -348,8 +375,11 @@ primaria e i caricamenti successivi aggiornano i valori esistenti.
 ### `weekly_box_office`
 
 Una riga per film, fonte, territorio e settimana. La chiave unica è
-`(source_name, territory, week_start, external_movie_title)`; il `rank` è un attributo, quindi una
-classifica rivista aggiorna le righe esistenti invece di sovrascrivere il film sbagliato.
+`(source_name, territory, week_start, title_key)`, dove `title_key` è una colonna generata
+(`lower(btrim(external_movie_title))`): una differenza di maiuscole o di spazi ai bordi tra una settimana e
+l'altra aggiorna la riga esistente invece di crearne una nuova (`external_movie_title` resta comunque
+l'ultimo valore visto, aggiornato a ogni upsert). Il `rank` è un attributo, quindi una classifica rivista
+aggiorna le righe esistenti invece di sovrascrivere il film sbagliato.
 `movie_id` è una FK verso `movies(id)` (`ON DELETE SET NULL`) e un nuovo caricamento non lo azzera mai;
 `source_movie_ref` punta al film della sorgente in `source_movies`.
 
@@ -401,6 +431,8 @@ con `git show <commit>` o `git log --all --oneline`.
   `extract_week_range()`.
 - Aggiungere test del parser con fixture HTML, evitando dipendenze dal sito
   remoto durante i test.
-- Valutare logging e retry con backoff per rate limit o indisponibilità delle
-  sorgenti esterne.
+- ~~Valutare logging e retry con backoff per rate limit o indisponibilità delle sorgenti esterne.~~
+  Fatto per TMDB e Wayback (`app/http_retry.py`); ComingSoon (`fetch_comingsoon_weekly_boxoffice`) resta senza retry.
 - Separare ulteriormente le CLI dalle utility di orchestrazione.
+- `requirements.txt` non ha un limite superiore di versione né hash: una major nuova di una dipendenza
+  potrebbe rompere qualcosa senza preavviso (oggi `pip-audit` non segnala vulnerabilità).

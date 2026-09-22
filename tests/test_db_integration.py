@@ -175,6 +175,32 @@ class DatabaseIntegrationTests(_DatabaseTestCase):
         self.assertEqual(1, written)
         self.assertEqual([(3,)], self.q("SELECT rank FROM weekly_box_office"))
 
+    def test_casing_or_edge_whitespace_change_updates_the_same_row_instead_of_duplicating_it(self):
+        self.repo.upsert_records(self.conn, [_record("Cars: Motori Ruggenti", 1, "401", 900)])
+        # stessa settimana, stesso film, ma la sorgente ha cambiato maiuscole/spazi ai bordi
+        # (title_key normalizza solo con lower(btrim(...)): la spaziatura interna resta invariata)
+        written = self.repo.upsert_records(self.conn, [_record("  cars: motori ruggenti  ", 1, "401", 800)])
+        self.conn.commit()
+
+        self.assertEqual(1, written)
+        self.assertEqual(
+            [("  cars: motori ruggenti  ", 800.0)],
+            self.q("SELECT external_movie_title, weekly_gross FROM weekly_box_office"),
+        )
+
+    def test_two_different_titles_in_the_same_batch_with_different_casing_do_not_collide(self):
+        # "Blue" e "BLUE FILM" normalizzano a chiavi diverse: devono restare due righe distinte
+        written = self.repo.upsert_records(
+            self.conn, [_record("Blue", 5, "1", 100), _record("BLUE FILM", 6, "2", 90)]
+        )
+        self.conn.commit()
+
+        self.assertEqual(2, written)
+        self.assertEqual(
+            {"Blue", "BLUE FILM"},
+            {row[0] for row in self.q("SELECT external_movie_title FROM weekly_box_office")},
+        )
+
     def test_legacy_rows_without_source_id_still_upsert(self):
         self.repo.upsert_records(self.conn, [_record("Vecchio", 1, None, 500)])
         self.repo.upsert_records(self.conn, [_record("Vecchio", 1, "77", 600)])  # ora arriva l'ID

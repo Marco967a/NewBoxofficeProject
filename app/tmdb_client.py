@@ -4,6 +4,7 @@ from datetime import date
 
 import requests
 
+from app.http_retry import get_with_retry
 from app.settings import get_settings
 
 
@@ -20,6 +21,7 @@ class TMDBClient:
         self.read_token = getattr(settings, "tmdb_read_token", "") or ""
         self.timeout = settings.request_timeout
         self.session = requests.Session()
+        self._sleep = time.sleep  # sovrascrivibile nei test per non aspettare davvero i ritardi del retry
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         params = dict(params or {})
@@ -30,13 +32,17 @@ class TMDBClient:
             params["api_key"] = self.api_key
 
         try:
-            response = self.session.get(
+            # TMDB risponde 429 quando si supera il rate limit e, più raramente, 5xx transitori:
+            # get_with_retry riprova con attese crescenti invece di far fallire subito il match.
+            response = get_with_retry(
+                self.session,
                 f"{self.BASE_URL}{path}",
                 params=params,
                 headers=headers,
                 timeout=self.timeout,
+                log_label=f"TMDB {path}",
+                sleep=self._sleep,
             )
-            response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:
             # Le eccezioni di requests contengono l'URL completo (api_key inclusa):

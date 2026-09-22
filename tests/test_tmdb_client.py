@@ -14,7 +14,9 @@ SECRET = "super-secret-tmdb-key"
 def build_client() -> TMDBClient:
     settings = SimpleNamespace(tmdb_api_key=SECRET, request_timeout=5)
     with patch("app.tmdb_client.get_settings", return_value=settings):
-        return TMDBClient()
+        client = TMDBClient()
+    client._sleep = lambda seconds: None  # niente attese reali nei test, a meno che non le testino apposta
+    return client
 
 
 class TMDBClientTests(unittest.TestCase):
@@ -67,6 +69,7 @@ class TMDBAuthTests(unittest.TestCase):
         settings = SimpleNamespace(tmdb_api_key=SECRET, request_timeout=5, **settings_kwargs)
         with patch("app.tmdb_client.get_settings", return_value=settings):
             client = TMDBClient()
+        client._sleep = lambda seconds: None
         response = MagicMock()
         response.json.return_value = {}
         client.session = MagicMock()
@@ -97,6 +100,50 @@ class TMDBAuthTests(unittest.TestCase):
             client._get("/movie/1")
 
         self.assertNotIn(self.TOKEN, str(ctx.exception))
+
+
+class TMDBRetryTests(unittest.TestCase):
+    @staticmethod
+    def _response(status):
+        r = MagicMock(status_code=status)
+        r.raise_for_status.side_effect = None if status < 400 else requests.HTTPError(f"HTTP {status}", response=r)
+        r.json.return_value = {"ok": True}
+        return r
+
+    def test_rate_limit_is_retried_with_growing_waits_and_then_succeeds(self) -> None:
+        client = build_client()
+        client.session = MagicMock()
+        waits = []
+        client._sleep = waits.append
+        client.session.get.side_effect = [self._response(429), self._response(503), self._response(200)]
+
+        result = client._get("/movie/1")
+
+        self.assertEqual({"ok": True}, result)
+        self.assertEqual([5, 15], waits)
+        self.assertEqual(3, client.session.get.call_count)
+
+    def test_exhausted_retries_raise_without_leaking_the_key(self) -> None:
+        client = build_client()
+        client.session = MagicMock()
+        client.session.get.return_value = self._response(429)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            client._get("/movie/1")
+
+        self.assertNotIn(SECRET, str(ctx.exception))
+        self.assertIn("status=429", str(ctx.exception))
+        self.assertEqual(4, client.session.get.call_count)  # 1 tentativo + 3 retry
+
+    def test_client_error_is_not_retried(self) -> None:
+        client = build_client()
+        client.session = MagicMock()
+        client.session.get.return_value = self._response(404)
+
+        with self.assertRaises(RuntimeError):
+            client._get("/movie/1")
+
+        self.assertEqual(1, client.session.get.call_count)
 
 
 class TMDBSearchTests(unittest.TestCase):

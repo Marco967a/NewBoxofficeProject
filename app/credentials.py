@@ -2,9 +2,10 @@
 
 Nel deposito (Windows Credential Manager, cifrato con DPAPI e legato all'account utente) i segreti stanno
 sotto il servizio "NewBoxofficeProject" con questi nomi:
-    db:<ruolo>        password del ruolo PostgreSQL (es. db:boxoffice_app)
-    tmdb_api_key      chiave API TMDB
-    tmdb_read_token   API Read Access Token TMDB (preferito: viaggia in un header, non nell'URL)
+    db:<ruolo>          password del ruolo PostgreSQL (es. db:boxoffice_app)
+    tmdb_api_key        chiave API TMDB
+    tmdb_read_token     API Read Access Token TMDB (preferito: viaggia in un header, non nell'URL)
+    notify_webhook_url  opzionale: URL webhook (Slack/Discord/Teams) per i guasti della pipeline
 
 Nessuna funzione di questo modulo scrive segreti nei log.
 """
@@ -15,7 +16,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 SERVICE = "NewBoxofficeProject"
-KNOWN_NAMES = ("tmdb_api_key", "tmdb_read_token")
+KNOWN_NAMES = ("tmdb_api_key", "tmdb_read_token", "notify_webhook_url")
 
 
 def get_secret(name: str, env_var: Optional[str] = None) -> Optional[str]:
