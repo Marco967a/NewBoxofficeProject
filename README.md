@@ -15,6 +15,7 @@ tramite TMDB e salvare i dati in PostgreSQL.
 - [Esecuzione](#esecuzione)
 - [Test e Continuous Integration](#test-e-continuous-integration)
 - [Schema dati](#schema-dati)
+- [Ciclo di vita e retention dei dati](#ciclo-di-vita-e-retention-dei-dati)
 - [Cronologia del progetto](#cronologia-del-progetto)
 - [Limitazioni e prossimi passi](#limitazioni-e-prossimi-passi)
 
@@ -135,7 +136,7 @@ python scripts/manage_secrets.py set tmdb_read_token     # chiede il valore senz
 python scripts/manage_secrets.py get db:postgres --show  # recupero della password amministratore, se serve
 python scripts/setup_db_roles.py --verify-only           # prova cosa possono e cosa NON possono fare i ruoli
 python scripts/setup_db_roles.py --rotate                # nuove password per tutti i ruoli
-python scripts/backup_db.py --label prima_di_x           # backup con pg_dump in backups/
+python scripts/backup_db.py --label prima_di_x           # backup con pg_dump in backups/ (poi applica la retention, vedi «Ciclo di vita e retention dei dati»)
 ```
 
 **Prima configurazione** (una tantum, da amministratore PostgreSQL): `python scripts/manage_secrets.py import-env --strip`
@@ -411,6 +412,24 @@ Viene salvata anche se il caricamento fallisce, così si può rielaborare senza 
 
 Registra pipeline, fonte, stato, timestamp, numero di record letti e scritti
 ed eventuali errori.
+
+## Ciclo di vita e retention dei dati
+
+Ogni store che scrive su disco o su tabella ha una decisione di retention esplicita, non solo
+implicita nel codice:
+
+| Store | Cosa contiene | Tasso di crescita | Decisione |
+|---|---|---|---|
+| `backups/` | dump `pg_dump` manuali prima di operazioni rischiose | irregolare, manuale | **automatica**: `backup_db.py` tiene 30 giorni e comunque almeno gli ultimi 3 dump (`--keep-days`/`--keep-min`) |
+| `raw_snapshots` | pagina HTML grezza, solo dai run di recupero Wayback (non dai run settimanali normali) | poche righe, solo quando serve un recupero | **conservare indefinitamente**: volume minimo, valore di audit/replay (confronto riga per riga tra settimane recuperate e in quarantena) |
+| `weekly_box_office_quarantine` | le righe false del backfill originale, tabella di sola lettura per l'app (nessun `INSERT` dalla pipeline) | statica, non cresce più | **conservare indefinitamente**: è l'audit trail dell'incidente che ha motivato l'intero audit dati |
+| `ingestion_runs` | log di ogni esecuzione pipeline (stato, tempi, errori) | poche righe a settimana | **conservare indefinitamente**: volume trascurabile anche su anni, è il log di audit della pipeline |
+| `logs/weekly_*.log` | log testuali di `run_weekly.ps1` | una manciata a settimana | **90 giorni**, cancellazione automatica dentro `run_weekly.ps1` |
+
+`backups/` è l'unico store con crescita davvero illimitata (creato a mano prima di ogni operazione
+rischiosa, mai svuotato): per questo è l'unico con pulizia automatica nel codice. Gli altri store
+sono log/audit trail a bassissimo volume: per quelli la retention corretta è "per sempre finché non
+diventano un problema reale", scritta qui esplicitamente invece di restare una scelta implicita.
 
 ## Cronologia del progetto
 

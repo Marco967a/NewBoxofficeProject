@@ -226,3 +226,21 @@ di sapere se serviva davvero) al momento del DDL vero e proprio (`app/migrations
 basta. 5 nuovi test (2 in `tests/test_db.py`, riscritto perché testava il comportamento rimosso; 3 nuovi in
 `tests/test_migrations_permissions.py`), più le due verifiche dal vivo del punto precedente. Suite: 191 test, tutti
 verdi. Pubblicato in un commit correttivo separato subito dopo, con la CI ripassata.
+
+### Ciclo di vita e retention dei dati (2026-09-23)
+
+Ripresa l'indagine con focus specifico sul ciclo di vita del dato (non solo correttezza/sicurezza). Verificato prima
+lo stato attuale: `health_check.py` dà 0 FAIL e solo 2 WARN, entrambi anomalie della sorgente ComingSoon stessa
+(Coyote vs. Acme, Oceania — importi palesemente errati nella pagina, non un problema nostro), coerenti con quanto già
+noto. Nessuna nuova anomalia nel DB.
+
+Gap reale trovato: **nessuna politica di retention dichiarata**. `backups/` accumulava dump `pg_dump` (9 file, da due
+giorni di sessioni di audit) senza mai pulire — l'unico store con crescita davvero illimitata, perché creato a mano
+prima di ogni operazione rischiosa e mai svuotato. Gli altri store (`raw_snapshots`, `weekly_box_office_quarantine`,
+`ingestion_runs`, `logs/`) crescono lentamente o sono statici e hanno valore di audit trail: per quelli la decisione
+corretta non era cancellare, ma **scrivere esplicitamente** la policy invece di lasciarla implicita.
+
+Fatto: `scripts/backup_db.py` applica ora una retention automatica dopo ogni backup (`select_backups_to_prune`,
+logica pura testata in `tests/test_backup_retention.py`: tiene sempre gli ultimi `--keep-min` dump, poi tra i
+restanti cancella quelli più vecchi di `--keep-days`; default 3 dump / 30 giorni). Nuova sezione "Ciclo di vita e
+retention dei dati" in `README.md` con la tabella completa store-per-store e il perché di ogni decisione.
