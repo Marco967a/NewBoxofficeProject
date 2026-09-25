@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Manuale utente - NewBoxofficeProject</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 10.5pt; line-height: 1.5; color: #1a1a1a; }
+  h1 { font-size: 26pt; margin: 0 0 4pt; color: #12355b; }
+  h2 { font-size: 15pt; color: #12355b; border-bottom: 2px solid #12355b; padding-bottom: 3pt; margin: 22pt 0 8pt; break-after: avoid; }
+  h3 { font-size: 11.5pt; color: #12355b; margin: 14pt 0 4pt; break-after: avoid; }
+  p, li { orphans: 3; widows: 3; }
+  code, pre { font-family: Consolas, "Courier New", monospace; font-size: 9pt; }
+  code { background: #eef1f5; padding: 0 3pt; border-radius: 2pt; }
+  pre { background: #f4f6f8; border: 1px solid #d5dbe2; border-left: 3px solid #12355b; padding: 6pt 8pt; white-space: pre-wrap; word-break: break-word; break-inside: avoid; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.5pt; }
+  th, td { border: 1px solid #c9d0d8; padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #12355b; color: #fff; }
+  tr { break-inside: avoid; }
+  td:first-child code { white-space: pre-wrap; word-break: break-word; }
+  .cover { min-height: 240mm; display: flex; flex-direction: column; justify-content: center; break-after: page; }
+  .cover .sub { font-size: 13pt; color: #444; margin-bottom: 24pt; }
+  .cover .meta { color: #666; font-size: 10pt; }
+  .toc { break-after: page; }
+  .toc ol { line-height: 1.9; font-size: 11.5pt; }
+  .note { background: #fff8e1; border-left: 3px solid #e0a800; padding: 6pt 8pt; margin: 8pt 0; break-inside: avoid; }
+  .flow { text-align: center; font-weight: 600; background: #eef3f9; border: 1px solid #c9d6e6; padding: 8pt; margin: 8pt 0; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <h1>NewBoxofficeProject</h1>
+  <div class="sub">Manuale utente e guida ai comandi</div>
+  <div class="meta">Pipeline box office italiano: ComingSoon &rarr; TMDB &rarr; PostgreSQL &rarr; sito vetrina<br>Aggiornato al 25 settembre 2026</div>
+</section>
+
+<section class="toc">
+  <h2 style="margin-top:0">Indice</h2>
+  <ol>
+    <li>Cos'è il progetto</li>
+    <li>Prerequisiti e installazione</li>
+    <li>Configurazione e credenziali</li>
+    <li>Comandi principali (riepilogo)</li>
+    <li>Flussi di lavoro tipici</li>
+    <li>Esecuzione pianificata e notifiche</li>
+    <li>Test</li>
+    <li>Risoluzione dei problemi</li>
+    <li>Limiti da conoscere</li>
+  </ol>
+</section>
+
+<h2>1. Cos'è il progetto</h2>
+<p>NewBoxofficeProject raccoglie ogni settimana la classifica del box office italiano da
+<strong>ComingSoon.it</strong>, collega ogni film alla scheda <strong>TMDB</strong> (<code>movie_id</code>) e salva
+tutto in <strong>PostgreSQL</strong>. I KPI vengono poi esportati verso il sito vetrina (repository separato
+<code>boxoffice-site</code>).</p>
+<div class="flow">ComingSoon &rarr; weekly_run &rarr; PostgreSQL &rarr; resolve_matches (TMDB) &rarr; health_check &rarr; export KPI &rarr; sito</div>
+<p>Tutti i comandi si lanciano da <strong>PowerShell</strong> nella cartella radice del progetto, con il virtualenv
+attivo (o usando <code>.venv\Scripts\python.exe</code>).</p>
+
+<h2>2. Prerequisiti e installazione</h2>
+<ul>
+  <li>Windows con PowerShell, Python 3.14 e PostgreSQL 18 in locale.</li>
+  <li>Un account TMDB (token di lettura o chiave API).</li>
+</ul>
+<pre>python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt</pre>
+
+<h3>Prima configurazione (una tantum)</h3>
+<pre>python scripts/manage_secrets.py import-env --strip      # sposta gli eventuali segreti di .env nel deposito
+python scripts/setup_db_roles.py --database boxoffice    # crea i ruoli, i privilegi e le password
+# poi imposta DB_USER=boxoffice_app in .env
+python scripts/migrate.py                                # crea/aggiorna lo schema
+python scripts/manage_secrets.py set tmdb_read_token     # chiede il token senza mostrarlo</pre>
+
+<h2>3. Configurazione e credenziali</h2>
+<p>Copia <code>.env.example</code> in <code>.env</code>. Il file contiene <strong>solo valori non segreti</strong>.</p>
+<table>
+  <tr><th>Variabile</th><th>Uso</th></tr>
+  <tr><td><code>DB_HOST</code>, <code>DB_NAME</code>, <code>DB_USER</code></td><td>Obbligatorie (es. localhost, boxoffice, boxoffice_app)</td></tr>
+  <tr><td><code>DB_PORT</code>, <code>LOG_LEVEL</code>, <code>REQUEST_TIMEOUT</code></td><td>Opzionali, hanno un valore predefinito</td></tr>
+  <tr><td><code>DB_OWNER_USER</code>, <code>DB_RO_USER</code></td><td>Nomi dei ruoli owner (migrazioni, backup) e sola lettura (controlli)</td></tr>
+</table>
+<p>Password e chiavi API stanno nella <strong>Gestione credenziali di Windows</strong> (servizio
+<code>NewBoxofficeProject</code>). Le variabili d'ambiente <code>DB_PASSWORD</code>, <code>TMDB_API_KEY</code>,
+<code>TMDB_READ_TOKEN</code> hanno la precedenza, e servono alla CI.</p>
+
+<h3>Ruoli PostgreSQL</h3>
+<table>
+  <tr><th>Ruolo</th><th>Chi lo usa</th><th>Permessi</th></tr>
+  <tr><td><code>boxoffice_owner</code></td><td>migrate, backup</td><td>Proprietario, unico con DDL</td></tr>
+  <tr><td><code>boxoffice_app</code></td><td>pipeline, resolver, Wayback</td><td>SELECT / INSERT / UPDATE</td></tr>
+  <tr><td><code>boxoffice_ro</code></td><td>health_check, verify_db</td><td>Solo SELECT</td></tr>
+  <tr><td><code>boxoffice_test</code></td><td>test di integrazione</td><td>Solo database temporanei</td></tr>
+</table>
+
+<h3>Database di sviluppo</h3>
+<p>Per sperimentare senza toccare i dati reali usa <code>boxoffice_dev</code> (va creato a mano con
+<code>CREATE DATABASE</code> e inizializzato con <code>migrate.py</code>):</p>
+<pre>$env:DB_NAME = "boxoffice_dev"; python scripts/weekly_run.py</pre>
+
+<h2>4. Comandi principali (riepilogo)</h2>
+
+<h3>Esecuzione della pipeline</h3>
+<table>
+  <tr><th style="width:44%">Comando</th><th>Cosa fa</th></tr>
+  <tr><td><code>python main_v3.py</code></td><td>Pipeline completa: carica la classifica corrente, poi abbina i film a TMDB.</td></tr>
+  <tr><td><code>python scripts/weekly_run.py</code></td><td>Solo caricamento della classifica ComingSoon corrente. Opzioni: <code>--source-name</code>, <code>--historical-start-date</code>, <code>--weeks</code>.</td></tr>
+  <tr><td><code>python scripts/resolve_matches.py</code></td><td>Abbina a TMDB i film senza <code>movie_id</code>.</td></tr>
+  <tr><td><code>python scripts/resolve_matches.py --dry-run</code></td><td>Valuta gli abbinamenti senza scrivere.</td></tr>
+  <tr><td><code>python scripts/resolve_matches.py --review</code></td><td>Elenca i match incerti con i candidati.</td></tr>
+  <tr><td><code>python scripts/resolve_matches.py --set ID --tmdb-id N</code></td><td>Conferma a mano un match (ID di <code>source_movies</code> preso da <code>--review</code>).</td></tr>
+  <tr><td><code>python scripts/resolve_matches.py --no-match ID</code></td><td>Segna il film come non presente su TMDB.</td></tr>
+  <tr><td><code>python scripts/resolve_matches.py --retry</code></td><td>Riprova anche i casi in revisione o senza match.</td></tr>
+  <tr><td><code>python scripts/bootstrap.py</code></td><td>Facoltativo, fuori pipeline: carica i film TMDB più redditizi.</td></tr>
+</table>
+
+<h3>Controlli</h3>
+<table>
+  <tr><th style="width:44%">Comando</th><th>Cosa fa</th></tr>
+  <tr><td><code>python scripts/health_check.py</code></td><td>Controlli di salute; esce con codice 1 se c'è un FAIL. Opzioni: <code>--strict</code> (anche i WARN sono errori), <code>--max-age-days</code>, <code>--gap-weeks</code>, <code>--territory</code>.</td></tr>
+  <tr><td><code>python scripts/verify_db.py</code></td><td>Conteggi e copertura dei <code>movie_id</code> (ruolo sola lettura).</td></tr>
+  <tr><td><code>python test_project.py</code></td><td>Report di verifica di configurazione e ambiente.</td></tr>
+</table>
+
+<h3>Database e dati</h3>
+<table>
+  <tr><th style="width:44%">Comando</th><th>Cosa fa</th></tr>
+  <tr><td><code>python scripts/migrate.py</code></td><td>Applica le migrazioni mancanti e riapplica i privilegi.</td></tr>
+  <tr><td><code>python scripts/migrate.py --status</code></td><td>Mostra lo stato delle migrazioni senza modificare nulla.</td></tr>
+  <tr><td><code>python scripts/backup_db.py --label prima_di_x</code></td><td>Backup con <code>pg_dump</code> in <code>backups/</code>. Retention automatica: 30 giorni, minimo 3 dump (<code>--keep-days</code>, <code>--keep-min</code>).</td></tr>
+  <tr><td><code>python scripts/export_site_data.py</code></td><td>Esporta i KPI in JSON (<code>--out</code> per il percorso). Non scrive nulla se l'health check è in FAIL.</td></tr>
+  <tr><td><code>python scripts/recover_from_wayback.py --dry-run</code></td><td>Mostra quali settimane mancanti si possono recuperare dall'Internet Archive.</td></tr>
+  <tr><td><code>python scripts/recover_from_wayback.py</code></td><td>Scrive le settimane recuperabili (poi lanciare <code>resolve_matches.py</code>).</td></tr>
+</table>
+
+<h3>Credenziali e sicurezza</h3>
+<table>
+  <tr><th style="width:44%">Comando</th><th>Cosa fa</th></tr>
+  <tr><td><code>python scripts/manage_secrets.py list</code></td><td>Elenca i segreti presenti (mai i valori).</td></tr>
+  <tr><td><code>python scripts/manage_secrets.py set NOME</code></td><td>Salva un segreto; il valore è chiesto senza mostrarlo (<code>--stdin</code> per leggerlo da input).</td></tr>
+  <tr><td><code>python scripts/manage_secrets.py get NOME --show</code></td><td>Mostra un segreto.</td></tr>
+  <tr><td><code>python scripts/manage_secrets.py delete NOME</code></td><td>Elimina un segreto.</td></tr>
+  <tr><td><code>python scripts/setup_db_roles.py --verify-only</code></td><td>Verifica cosa i ruoli possono e non possono fare, senza modificare nulla.</td></tr>
+  <tr><td><code>python scripts/setup_db_roles.py --rotate</code></td><td>Genera nuove password per tutti i ruoli.</td></tr>
+  <tr><td><code>.\scripts\harden_permissions.ps1</code></td><td>Limita i permessi di <code>.env</code>, <code>backups/</code>, <code>logs/</code> al solo utente corrente.</td></tr>
+</table>
+
+<h3>Pianificazione</h3>
+<table>
+  <tr><th style="width:44%">Comando</th><th>Cosa fa</th></tr>
+  <tr><td><code>.\scripts\run_weekly.ps1</code></td><td>Esecuzione non presidiata: pipeline, health check, notifica dei guasti, export KPI verso il sito. Scrive <code>logs\weekly_&lt;data&gt;.log</code>.</td></tr>
+  <tr><td><code>.\scripts\register_weekly_task.ps1</code></td><td>Registra l'attività di Windows (lunedì e venerdì alle 12:00). <code>-Time 09:30</code> cambia l'orario, <code>-Remove</code> la elimina.</td></tr>
+  <tr><td><code>Start-ScheduledTask -TaskName "NewBoxOffice-WeeklyRun"</code></td><td>Avvio manuale dell'attività pianificata.</td></tr>
+</table>
+
+<h2>5. Flussi di lavoro tipici</h2>
+
+<h3>Routine settimanale (manuale)</h3>
+<pre>python main_v3.py
+python scripts/health_check.py
+python scripts/verify_db.py</pre>
+
+<h3>Revisione dei match dubbi</h3>
+<p>Un film è abbinato in automatico se il punteggio è &ge; 0.85 con almeno 0.10 di margine sul secondo candidato.
+Tra 0.55 e la soglia va in revisione; sotto è "senza match".</p>
+<pre>python scripts/resolve_matches.py --review                 # trova l'ID del film e i candidati
+python scripts/resolve_matches.py --set 2 --tmdb-id 920    # conferma il candidato giusto
+python scripts/resolve_matches.py --no-match 28            # oppure: non esiste su TMDB</pre>
+
+<h3>Recupero di una settimana persa</h3>
+<pre>python scripts/recover_from_wayback.py --dry-run
+python scripts/recover_from_wayback.py
+python scripts/resolve_matches.py</pre>
+
+<h3>Prima di un'operazione rischiosa</h3>
+<pre>python scripts/backup_db.py --label prima_di_x
+python scripts/migrate.py --status</pre>
+
+<h3>Interrogare i dati</h3>
+<p>La vista <code>v_weekly_enriched</code> unisce classifica, film TMDB e stato del match ed è il punto di accesso
+consigliato per report e query.</p>
+<pre>SELECT rank, external_movie_title, tmdb_title, weekly_gross, gross_per_screen
+FROM v_weekly_enriched
+WHERE week_start = (SELECT max(week_start) FROM weekly_box_office)
+ORDER BY rank;</pre>
+
+<h2>6. Esecuzione pianificata e notifiche</h2>
+<p>ComingSoon <strong>non ha archivio</strong>: una settimana non caricata non si recupera facilmente, quindi la
+pipeline va eseguita ogni settimana. L'attività pianificata parte il lunedì e il venerdì alle 12:00 (il venerdì è
+una rete di sicurezza se il PC era spento). L'upsert è idempotente: rieseguire non crea duplicati.</p>
+<ul>
+  <li>Gira come l'utente corrente <strong>solo con la sessione aperta</strong>; se il PC era spento parte appena possibile.</li>
+  <li>I log sono in <code>logs/</code> e si cancellano dopo 90 giorni.</li>
+  <li>Se la pipeline fallisce o l'health check trova un FAIL: notifica desktop di Windows e, facoltativamente, webhook
+      (compatibile Slack/Discord) impostabile con <code>python scripts/manage_secrets.py set notify_webhook_url</code>.</li>
+  <li>Il codice di uscita compare come "Ultimo risultato" nell'Utilità di pianificazione.</li>
+</ul>
+
+<h2>7. Test</h2>
+<pre>python -m unittest discover --start-directory tests --verbose
+
+# test di integrazione con PostgreSQL (database temporaneo)
+$env:RUN_DB_TESTS = "1"; python -m unittest tests.test_db_integration -v</pre>
+<p>I test standard non richiedono PostgreSQL, TMDB né <code>.env</code>. La CI su GitHub esegue la suite con
+Python 3.14, un servizio PostgreSQL 18, <code>bandit</code> e <code>pip-audit</code>.</p>
+
+<h2>8. Risoluzione dei problemi</h2>
+<table>
+  <tr><th style="width:38%">Sintomo</th><th>Cosa fare</th></tr>
+  <tr><td>Errore "migrazioni da applicare"</td><td>Lancia <code>python scripts/migrate.py</code>. L'applicazione non esegue DDL.</td></tr>
+  <tr><td>Health check in FAIL</td><td>Leggi il messaggio: pipeline ferma o dati incoerenti. Controlla l'ultimo log in <code>logs/</code>. I soli WARN (es. settimane storiche già perse) non sono guasti.</td></tr>
+  <tr><td>Settimana mancante</td><td>Prova <code>recover_from_wayback.py</code>; Wayback ha pochi snapshot, non tutte le settimane sono recuperabili.</td></tr>
+  <tr><td><code>resolve_matches.py</code> esce con 1</td><td>La connessione al database è caduta a metà elenco: rilancia il comando, riprende dai film rimasti.</td></tr>
+  <tr><td>Errore sul deposito credenziali</td><td>Verifica con <code>manage_secrets.py list</code> che il segreto esista; controlla di essere nella sessione utente corretta.</td></tr>
+  <tr><td>Nessuna notifica ricevuta</td><td>La notifica desktop funziona solo a sessione aperta; per il webhook controlla <code>notify_webhook_url</code>.</td></tr>
+  <tr><td>Un film ha un <code>[errore]</code> nel resolver</td><td>È un guasto TMDB o dati di quel solo film: gli altri proseguono. Riprova con <code>--retry</code>.</td></tr>
+</table>
+
+<h2>9. Limiti da conoscere</h2>
+<div class="note">
+  <strong>Niente archivio storico.</strong> ComingSoon serve sempre la classifica corrente e ignora le date: il backfill
+  (<code>backfill_historical_weekly.py</code>) carica solo le settimane davvero presenti nella pagina. Lo storico si costruisce
+  eseguendo la pipeline ogni settimana.
+</div>
+<ul>
+  <li>Lo schema si modifica solo con nuove migrazioni in <code>migrations/</code>; una migrazione già applicata non va mai modificata (il checksum è verificato).</li>
+  <li>Non usare Box Office Mojo come fonte alternativa: il suo <code>robots.txt</code> vieta l'accesso automatico.</li>
+  <li>Il deposito credenziali non protegge da un programma malevolo eseguito con il tuo stesso account.</li>
+  <li>Retention: <code>backups/</code> 30 giorni (min. 3 dump), log 90 giorni; le tabelle di audit (<code>ingestion_runs</code>, <code>raw_snapshots</code>, quarantena) si conservano indefinitamente.</li>
+</ul>
+
+</body>
+</html>
