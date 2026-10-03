@@ -122,7 +122,7 @@ accessibile a nessuno finché non viene aggiunta lì (un test lo impone), e `mig
 ogni migrazione. Le password sono passate a PostgreSQL già trasformate in hash SCRAM, quindi non compaiono nemmeno
 nei log del server.
 
-**Dove stanno i segreti.** Nella Gestione credenziali di Windows (cifrata con DPAPI e legata al tuo account), servizio
+**Dove stanno i segreti.** Nella Gestione credenziali di Windows (cifrata con DPAPI e legata al mio account), servizio
 `NewBoxofficeProject`: `db:<ruolo>`, `tmdb_api_key`, `tmdb_read_token`. Se una variabile d'ambiente con lo stesso
 scopo è impostata (`DB_PASSWORD`, `TMDB_API_KEY`, `TMDB_READ_TOKEN`) ha la precedenza: serve alla CI. Quindi `.env`, i
 backup, i log e la cartella del progetto non contengono segreti.
