@@ -3,8 +3,8 @@
 # `RUN_DB_TESTS=1` incluso, prima di alzare il limite). Non c'è un lockfile con hash: per un progetto
 # personale di queste dimensioni un lockfile aggiungerebbe un altro strumento (pip-tools/uv) senza un
 # beneficio proporzionato; se il progetto crescesse, sarebbe il prossimo passo naturale.
-beautifulsoup4>=4.12,<5
-psycopg2-binary>=2.9.9,<3
-python-dotenv>=1.0.1,<2
-requests>=2.32.4,<3
-keyring>=25,<26
+beautifulsoup4>=4.15.0,<5
+psycopg2-binary>=2.9.13,<3
+python-dotenv>=1.2.4,<2
+requests>=2.34.2,<3
+keyring>=25.7.0,<26
