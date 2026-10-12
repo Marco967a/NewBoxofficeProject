@@ -374,6 +374,31 @@ Linux e un container Postgres usa-e-getta forniti da GitHub. In locale si può e
 separatamente, `bandit`/`pip-audit`, ma non il file YAML in sé: per farlo servirebbe Docker Desktop e lo strumento
 [`act`](https://github.com/nektos/act) (non installati su questa macchina).
 
+### Consegna continua (CD)
+
+La pipeline dati gira sul PC locale (attività pianificata + PostgreSQL locale), quindi non esiste un server su cui
+"deployare" da GitHub e non c'è un runner self-hosted: la CD è volutamente leggera.
+
+- **Sito vetrina** ([`boxoffice-site`](https://github.com/Marco967a/boxoffice-site)): `run_weekly.ps1` spinge il JSON dei
+  KPI su `main` e Cloudflare ricostruisce. Il controllo che blocca un JSON malformato è `validate_payload()` in
+  `scripts/export_site_data.py`, eseguito **prima** del push (se fallisce non viene scritto nulla). La CI del sito
+  (`astro build`) controlla il resto, e il job `smoke` verifica che il sito pubblico serva il `generated_at` appena
+  pubblicato: in caso contrario GitHub segnala il workflow fallito.
+- **Release**: un tag `vX.Y.Z` avvia [`release.yml`](.github/workflows/release.yml), che pretende una CI riuscita sul
+  commit taggato (non rilancia i test), crea la GitHub Release con le note generate e allega il manuale PDF. Per
+  pubblicarla, dopo che la CI del commit è verde: `git tag v1.0.0; git push origin v1.0.0`.
+- **Dependabot** (`.github/dependabot.yml`, in entrambi i repo): PR settimanali raggruppate per `pip`/`npm` e
+  `github-actions`, con le major escluse (vanno valutate a mano). Le PR passano dalla CI; le unisci tu.
+- **Aggiornare l'installazione locale** dopo una release o un merge (dalla radice del repo, con il venv attivo):
+
+```powershell
+git pull
+python -m pip install -r requirements.txt
+python scripts\backup_db.py
+python scripts\migrate.py
+python scripts\health_check.py
+```
+
 ## Schema dati
 
 ### `movies`

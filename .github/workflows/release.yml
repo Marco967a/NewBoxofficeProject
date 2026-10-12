@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # crea la GitHub Release
+  actions: read # legge l'esito della CI sul commit taggato
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Non riesegue i test: pretende che la CI abbia gia' passato su questo commit.
+      - name: Require a green CI run on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion=$(gh run list \
+            --workflow "Continuous Integration" \
+            --commit "$GITHUB_SHA" \
+            --status completed \
+            --json conclusion \
+            --jq '[.[] | select(.conclusion == "success")] | length')
+          if [ "$conclusion" -lt 1 ]; then
+            echo "::error::Nessuna esecuzione CI riuscita per $GITHUB_SHA: attendi la CI e ripubblica il tag"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            docs/Manuale_Utente_NewBoxoffice.pdf

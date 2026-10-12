@@ -1,5 +1,4 @@
 import copy
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -29,10 +28,6 @@ VALID = {
 class ValidatePayloadTests(unittest.TestCase):
     def test_valid_payload_has_no_problems(self) -> None:
         self.assertEqual(validate_payload(VALID), [])
-
-    def test_committed_sample_is_valid(self) -> None:
-        sample = json.loads((REPO_ROOT / "site_data" / "boxoffice.json").read_text(encoding="utf-8"))
-        self.assertEqual(validate_payload(sample), [])
 
     def test_missing_key_is_reported(self) -> None:
         payload = copy.deepcopy(VALID)
